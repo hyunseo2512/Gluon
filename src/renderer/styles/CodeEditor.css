@@ -1,0 +1,280 @@
+.code-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--bg-primary);
+}
+
+/* 에디터 탭 */
+.editor-tabs {
+  display: flex;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  min-height: 35px;
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+.editor-tabs::-webkit-scrollbar {
+  display: none;
+  /* Chrome/Safari */
+}
+
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 0 var(--spacing-md);
+  background-color: var(--bg-tertiary);
+  border-right: 1px solid var(--border-color);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  min-width: 120px;
+}
+
+.editor-tab.active {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.editor-tab:hover {
+  color: var(--text-primary);
+}
+
+.tab-icon {
+  font-size: 14px;
+}
+
+.tab-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tab-dirty {
+  color: var(--accent-blue);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.tab-close {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.editor-tab:hover .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.editor-tab-placeholder {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--spacing-md);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 에디터 컨테이너 */
+.editor-container {
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-empty {
+  display: none;
+}
+
+/* Drag & Drop Visuals */
+.editor-tab.drag-over {
+  position: relative;
+  background-color: var(--bg-hover);
+}
+
+.editor-tab.drag-over::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--accent-blue);
+  z-index: 10;
+  box-shadow: 0 0 4px var(--accent-blue);
+}
+
+/* Tab Error Badge */
+.tab-error-badge {
+  background-color: #f48771;
+  color: #1e1e1e;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 0 4px;
+  border-radius: 8px;
+  margin-left: 6px;
+  min-width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes popIn {
+  from {
+    transform: scale(0);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+/* Editor Empty State (Gluon Quantum) */
+.editor-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-primary);
+  /* Deep Void */
+  color: var(--text-primary);
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle Nebula Effect */
+.editor-empty-state::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 150%;
+  height: 150%;
+  background: radial-gradient(circle, rgba(137, 221, 255, 0.03) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.editor-empty-logo {
+  margin-bottom: 50px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.editor-empty-logo h1 {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  margin: 0;
+  background: linear-gradient(135deg, #C792EA 0%, #89DDFF 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 8px rgba(137, 221, 255, 0.3));
+}
+
+.editor-empty-version {
+  font-size: 13px;
+  color: #546E7A;
+  letter-spacing: 1px;
+  display: block;
+  margin-top: 6px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.editor-empty-shortcuts {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 15px 30px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: left;
+  position: relative;
+  z-index: 1;
+}
+
+.shortcut-label {
+  text-align: right;
+  color: #7A8999;
+}
+
+.shortcut-key {
+  background-color: rgba(30, 34, 45, 0.6);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  border: 1px solid rgba(137, 221, 255, 0.15);
+  color: #89DDFF;
+  /* Cyan Accent */
+  font-size: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Tab Navigation Buttons (Quantum Style) */
+.tab-scroll-controls {
+  padding: 0 4px;
+  border-left: 1px solid var(--border-color);
+  display: flex !important;
+  align-items: center;
+  gap: 2px;
+}
+
+.tab-nav-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #546E7A;
+  /* Dimmed */
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-nav-btn:hover {
+  background-color: rgba(137, 221, 255, 0.1);
+  color: #89DDFF;
+  /* Cyan Glow */
+  box-shadow: 0 0 6px rgba(137, 221, 255, 0.2);
+}
+
+.tab-nav-btn:active {
+  transform: scale(0.95);
+  background-color: rgba(137, 221, 255, 0.2);
+}
+
+.tab-nav-btn svg {
+  stroke-width: 2.5;
+  /* Slightly bolder */
+}

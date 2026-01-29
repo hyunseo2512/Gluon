@@ -1,0 +1,363 @@
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--bg-primary);
+  font-family: var(--font-mono);
+  position: relative;
+}
+
+/* .terminal-panel.maximized removed to allow inline expansion via App.tsx */
+
+/* 터미널 헤더 */
+.terminal-header {
+  display: flex !important;
+  /* Force display */
+  justify-content: space-between;
+  align-items: center;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  height: 35px;
+  min-height: 35px;
+  /* Prevent collapse */
+  overflow: hidden;
+  position: relative;
+  z-index: 2000;
+  /* Ensure on top */
+  flex-shrink: 0;
+}
+
+
+/* 터미널 탭 영역 */
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* 개별 터미널 탭 */
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 35px;
+  background-color: var(--bg-tertiary);
+  border-right: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+  min-width: 100px;
+  max-width: 200px;
+}
+
+.terminal-tab:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.terminal-tab.active {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border-bottom: 2px solid var(--accent-blue);
+}
+
+.terminal-tab .tab-icon {
+  /* flex-shrink: 0; */
+}
+
+.terminal-tab .tab-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 탭 닫기 버튼 (.close-tab-btn) */
+.close-tab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  /* 작게 */
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  opacity: 0;
+  transition: all 0.15s;
+  padding: 0;
+  cursor: pointer;
+  margin-left: 4px;
+}
+
+.terminal-tab:hover .close-tab-btn {
+  opacity: 1;
+}
+
+.close-tab-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* 탭 추가 버튼 컨테이너 */
+.new-tab-container {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  border-right: 1px solid var(--border-color);
+}
+
+/* 새 탭 버튼 (.new-tab-btn) */
+.new-tab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 35px;
+  /* 헤더 높이에 맞춤 */
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+  gap: 2px;
+}
+
+.new-tab-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* 셸 선택 메뉴 */
+.shell-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 0 0 4px 4px;
+  min-width: 140px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  margin-top: 0;
+  overflow: hidden;
+}
+
+.shell-menu-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  display: flex;
+  align-items: center;
+}
+
+.shell-menu-item:hover {
+  background-color: var(--bg-hover);
+}
+
+/* 액션 버튼 (닫기, 최대화) (.action-btn) */
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+  margin-left: 4px;
+  border-radius: 4px;
+}
+
+.action-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.action-btn.close-btn:hover {
+  background-color: #c42b1c;
+  /* Red close */
+  color: white;
+}
+
+/* 터미널 콘텐츠 영역 */
+.terminal-body {
+  flex: 1;
+  background-color: var(--bg-primary);
+  position: relative;
+  overflow: hidden;
+}
+
+.terminal-instance {
+  width: 100%;
+  height: 100%;
+}
+
+.terminal-instance .xterm {
+  padding: 10px;
+}
+
+.terminal-instance .xterm-viewport {
+  background-color: var(--bg-primary) !important;
+}
+
+/* Scrollbar Hide */
+.terminal-tabs::-webkit-scrollbar {
+  height: 0;
+}
+
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+}
+
+/* Terminal Context Menu */
+.terminal-context-menu {
+  background-color: #252526;
+  border: 1px solid #454545;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  padding: 4px 0;
+  min-width: 140px;
+  z-index: 9999;
+}
+
+.context-menu-item {
+  padding: 6px 16px;
+  font-size: 13px;
+  color: #cccccc;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.context-menu-item:hover {
+  background-color: #094771;
+  /* VSCode Selection Blue */
+  color: white;
+}
+
+
+/* Tab Scrolling */
+.terminal-tabs-container {
+  overflow: hidden;
+}
+
+.terminal-tabs {
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Tab Navigation Buttons */
+.tab-nav-group {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  height: 24px;
+  margin-left: 4px;
+}
+
+.tab-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 100%;
+  background-color: var(--bg-tertiary);
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tab-nav-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tab-nav-btn:first-child {
+  border-right: 1px solid var(--border-color);
+}
+
+
+/* Split Button Styles */
+/* Split Button Styles */
+.new-tab-btn {
+  display: flex !important;
+  /* override conflicting */
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  transition: all 0.15s;
+}
+
+.new-tab-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Ensure header is visible in full screen */
+.terminal-header {
+  z-index: 10;
+  position: relative;
+  flex-shrink: 0;
+  /* Prevent collapsing */
+}
+
+/* Fix z-index stacking context */
+.terminal-panel {
+  isolation: isolate;
+}
+
+/* Empty State */
+.terminal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  gap: 16px;
+}
+
+.terminal-empty p {
+  font-size: 14px;
+  margin: 0;
+}
+
+.terminal-empty button {
+  padding: 8px 16px;
+  background-color: var(--accent-blue);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: opacity 0.2s;
+}
+
+.terminal-empty button:hover {
+  opacity: 0.9;
+}

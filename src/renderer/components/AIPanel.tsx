@@ -1,0 +1,658 @@
+import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { ChatMessage } from '../types';
+import QuarkApi from '../services/api';
+import { useAuthStore } from '../store/authStore';
+import { SendIcon, LoaderIcon, PaperclipIcon, MicIcon, HistoryIcon, PlusIcon, ChevronUpIcon, ChevronDownIcon, ChatBubbleIcon, InfinityIcon, RotateCcwIcon, TrashIcon } from './Icons';
+import MarkdownRenderer from './MarkdownRenderer';
+import '../styles/AIPanel.css';
+
+interface AIPanelProps {
+  onClose: () => void;
+  projectName?: string;
+  workspacePath?: string;
+  onFileSystemChange?: () => void;
+}
+
+interface ChatSession {
+  id: string; // filename without extension
+  title: string;
+  timestamp: number;
+}
+
+/**
+ * AI 에이전트 패널 (Ctrl+L로 토글)
+ */
+function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemChange }: AIPanelProps) {
+  const { user } = useAuthStore();
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedModel, setSelectedModel] = useState('Quark-v2');
+
+  // Session State
+  const [sessionId, setSessionId] = useState<string>(() => Date.now().toString());
+  const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // AI 모드 상태 (Ask, Agent)
+  const [aiMode, setAiMode] = useState<'Ask' | 'Agent'>('Ask');
+
+  // Dropdown state for floating menu
+  const [activeDropdown, setActiveDropdown] = useState<'mode' | 'model' | null>(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Initialize Chat & Migrate
+  useEffect(() => {
+    const initChat = async () => {
+      try {
+        const homeDir = await window.electron.app.getPath('home');
+        const chatDir = `${homeDir}/.gluon/chats`;
+
+        // Ensure directory exists
+        const dirCheck = await window.electron.fs.exists(chatDir);
+        if (!dirCheck.exists) {
+          await window.electron.fs.createDir(chatDir);
+        }
+
+        // Migration: check for 'last_session.json'
+        const legacyPath = `${chatDir}/last_session.json`;
+        const legacyCheck = await window.electron.fs.exists(legacyPath);
+
+        if (legacyCheck.exists) {
+          const legacyContent = await window.electron.fs.readFile(legacyPath);
+          if (legacyContent.success && legacyContent.content) {
+            const newId = Date.now().toString();
+            const newPath = `${chatDir}/${newId}.json`;
+            await window.electron.fs.writeFile(newPath, legacyContent.content);
+            await window.electron.fs.delete(legacyPath);
+            console.log('Migrated legacy chat to', newId);
+            setSessionId(newId);
+
+            // Initial Load
+            const parsed = JSON.parse(legacyContent.content);
+            const hydrated = parsed.map((msg: any) => ({
+              ...msg,
+              timestamp: new Date(msg.timestamp)
+            }));
+            setMessages(hydrated);
+          }
+        } else {
+          // Load most recent session if available? 
+          // For now, let's start fresh. Or we can list files and load latest.
+          // Let's load the *Last Active* session ID from store if we had one.
+          // Since we don't track last active ID yet, we start fresh or load latest file.
+
+          // Let's load list to sort.
+          loadHistoryList();
+        }
+
+      } catch (err) {
+        console.error('Failed to initialize chat storage:', err);
+      }
+    };
+    initChat();
+  }, []);
+
+  // helper to load list
+  const loadHistoryList = async () => {
+    try {
+      const homeDir = await window.electron.app.getPath('home');
+      const chatDir = `${homeDir}/.gluon/chats`;
+      const result = await window.electron.fs.readDir(chatDir);
+
+      if (result.success && result.files) {
+        const sessions: ChatSession[] = [];
+
+        for (const file of result.files) {
+          if (!file.name.endsWith('.json') || file.name === 'last_session.json') continue;
+
+          const id = file.name.replace('.json', '');
+          const timestamp = parseInt(id) || 0; // if id is timestamp
+
+          // To get title, we have to read the file. This might be slow for many files.
+          // Optimization: Store title in separate index or filename.
+          // For now, read content (MVP).
+          let title = "New Chat";
+          try {
+            // Peek content? No generic 'peek'. Read whole file.
+            // Warning: Performance hit if many files.
+            const content = await window.electron.fs.readFile(file.path);
+            if (content.success && content.content) {
+              const data = JSON.parse(content.content);
+              if (data.length > 0) {
+                const first = data.find((m: any) => m.role === 'user');
+                if (first) {
+                  title = first.content.substring(0, 30) + (first.content.length > 30 ? '...' : '');
+                } else {
+                  title = "Empty Chat";
+                }
+              }
+            }
+          } catch (e) { /* ignore */ }
+
+          sessions.push({ id, title, timestamp });
+        }
+
+        // Sort DESC
+        sessions.sort((a, b) => b.timestamp - a.timestamp);
+        setChatHistory(sessions);
+      }
+    } catch (e) {
+      console.error('Failed load history list', e);
+    }
+  };
+
+  // Toggle History Panel
+  const toggleHistory = async () => {
+    if (!showHistory) {
+      await loadHistoryList();
+    }
+    setShowHistory(!showHistory);
+  };
+
+  // Delete session
+  const handleDeleteSession = async (e: React.MouseEvent, sid: string) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this conversation?')) return;
+
+    try {
+      const homeDir = await window.electron.app.getPath('home');
+      const filePath = `${homeDir}/.gluon/chats/${sid}.json`;
+
+      const result = await window.electron.fs.delete(filePath);
+      if (result.success) {
+        setChatHistory(prev => prev.filter(s => s.id !== sid));
+
+        // If deleted current active session
+        if (sid === sessionId) {
+          handleNewChat();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+    }
+  };
+
+  // Load specific session
+  const handleLoadSession = async (sid: string) => {
+    try {
+      setSessionId(sid);
+      const homeDir = await window.electron.app.getPath('home');
+      const filePath = `${homeDir}/.gluon/chats/${sid}.json`;
+
+      const result = await window.electron.fs.readFile(filePath);
+      if (result.success && result.content) {
+        const parsed = JSON.parse(result.content);
+        const hydrated = parsed.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+        setMessages(hydrated);
+      }
+      setShowHistory(false);
+    } catch (e) {
+      console.error('Failed to load session:', e);
+    }
+  };
+
+  // Save messages to File System
+  useEffect(() => {
+    if (!sessionId || messages.length === 0) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const homeDir = await window.electron.app.getPath('home');
+        const chatDir = `${homeDir}/.gluon/chats`;
+        const filePath = `${chatDir}/${sessionId}.json`;
+
+        await window.electron.fs.writeFile(filePath, JSON.stringify(messages, null, 2));
+      } catch (err) {
+        console.warn('Failed to save chat:', err);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [messages, sessionId]);
+
+  // Handle dropdown etc
+  const handleOpenDropdown = (type: 'mode' | 'model', event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (activeDropdown === type) { setActiveDropdown(null); return; }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const isInitial = messages.length === 0;
+    let top = isInitial ? rect.bottom + 4 : rect.top - 4;
+    setDropdownPos({ top, left: rect.left });
+    setActiveDropdown(type);
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.model-dropdown-container') && !target.closest('.model-dropdown-menu-floating')) {
+        setActiveDropdown(null);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+  useEffect(() => { scrollToBottom(); }, [messages]);
+
+  const handleSend = async (textOverride?: string) => {
+    if (isLoading) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      setIsLoading(false);
+      return;
+    }
+    const textToSend = textOverride || input;
+    if (!textToSend.trim()) return;
+
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: textToSend,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setIsLoading(true);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    const assistantMessageId = (Date.now() + 1).toString();
+
+    try {
+      const initialAssistantMessage: ChatMessage = {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        model: selectedModel,
+      };
+      setMessages((prev) => [...prev, initialAssistantMessage]);
+
+      let fullContent = '';
+      let systemPrompt: string | undefined;
+
+      if (workspacePath) {
+        try {
+          const rulesPath = `${workspacePath}/.gluon_rules`;
+          const exists = await window.electron.fs.exists(rulesPath);
+          if (exists.success && exists.exists) {
+            const rulesContent = await window.electron.fs.readFile(rulesPath);
+            if (rulesContent.success && rulesContent.content) {
+              systemPrompt = rulesContent.content;
+            }
+          }
+        } catch (err) { console.warn('Failed to load rules', err); }
+      }
+
+      for await (const chunk of QuarkApi.chatStream(textToSend, selectedModel, abortController.signal, aiMode, workspacePath, systemPrompt)) {
+        fullContent += chunk;
+        setMessages((prev) => prev.map(msg => msg.id === assistantMessageId ? { ...msg, content: fullContent } : msg));
+      }
+    } catch (error: any) {
+      if (error.name !== 'AbortError' && !error.message?.includes('aborted')) {
+        const errorMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'system',
+          content: `❌ 오류: ${error.message}`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      } else {
+        setMessages((prev) => prev.map(msg => msg.id === assistantMessageId && !msg.content ? { ...msg, content: '_(Generation cancelled)_' } : msg));
+      }
+    } finally {
+      setIsLoading(false);
+      abortControllerRef.current = null;
+      if (onFileSystemChange) onFileSystemChange();
+
+      setMessages((prev) => prev.map(msg =>
+        msg.id === assistantMessageId && !msg.content
+          ? { ...msg, content: '_(No response)_' }
+          : msg
+      ));
+    }
+  };
+
+  // NEW CHAT
+  const handleNewChat = () => {
+    setSessionId(Date.now().toString());
+    setMessages([]);
+    setInput('');
+    setShowHistory(false); // Make sure we leave history view
+  };
+
+  const handleRunCode = (code: string) => {
+    handleSend(`Execute this command:\n\`\`\`\n${code}\n\`\`\``);
+  };
+
+  const handleApproveAction = (toolName: string) => {
+    // Send a system-like message or user confirmation invisible to the history? 
+    // For simplicity, send a user message "Approved".
+    handleSend(`Approved to run ${toolName}`);
+  };
+
+  const renderFloatingDropdown = () => {
+    if (!activeDropdown) return null;
+    const isInitial = messages.length === 0;
+    const style: React.CSSProperties = {
+      position: 'fixed',
+      left: dropdownPos.left,
+      zIndex: 99999,
+      minWidth: '140px',
+      maxHeight: '200px',
+      overflowY: 'auto',
+      backgroundColor: '#1e1e1e',
+      border: '1px solid #333',
+      borderRadius: '6px',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+      padding: '4px',
+      animation: 'fadeIn 0.1s ease-out',
+      top: isInitial ? dropdownPos.top : undefined,
+      transform: isInitial ? undefined : 'translateY(-100%)',
+    };
+    if (!isInitial) style.top = dropdownPos.top;
+
+    return createPortal(
+      <div className="model-dropdown-menu-floating" style={style} onClick={(e) => e.stopPropagation()}>
+        {activeDropdown === 'mode' && (
+          <>
+            <div className={`model-dropdown-item mode-ask ${aiMode === 'Ask' ? 'selected' : ''}`} onClick={() => { setAiMode('Ask'); setActiveDropdown(null); }}>
+              <ChatBubbleIcon size={16} /> <span style={{ marginLeft: 8 }}>Ask</span>
+            </div>
+            <div className={`model-dropdown-item mode-agent ${aiMode === 'Agent' ? 'selected' : ''}`} onClick={() => { setAiMode('Agent'); setActiveDropdown(null); }}>
+              <InfinityIcon size={16} /> <span style={{ marginLeft: 8 }}>Agent</span>
+            </div>
+          </>
+        )}
+        {activeDropdown === 'model' && (
+          <>
+            <div className={`model-dropdown-item ${selectedModel === 'Quark-v2' ? 'selected' : ''}`} onClick={() => { setSelectedModel('Quark-v2'); setActiveDropdown(null); }}>Quark v2</div>
+          </>
+        )}
+      </div>, document.body
+    );
+  };
+
+  const renderInputArea = () => {
+    const isInitial = messages.length === 0;
+    const DropdownIcon = isInitial ? ChevronDownIcon : ChevronUpIcon;
+    return (
+      <div className="ai-input-area" style={isInitial ? { borderTop: 'none', padding: 0 } : {}}>
+        <div style={isInitial ? { width: '100%', maxWidth: '600px', margin: '0 auto' } : { width: '100%' }}>
+          <div className="ai-input-box">
+            <textarea
+              className="ai-input-field"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+              placeholder={isInitial ? "무엇이든 물어보세요..." : `${aiMode} anything (Ctrl+L), @ to mention...`}
+              disabled={isLoading}
+              rows={isInitial ? 3 : 2}
+              autoFocus
+            />
+            <div className="ai-input-footer">
+              <div className="ai-input-footer-left">
+                <div className="model-dropdown-container ai-mode-dropdown-container" style={{ marginRight: '2px' }}>
+                  <button className={`ai-model-select mode-${aiMode.toLowerCase()}`} onClick={(e) => !isLoading && handleOpenDropdown('mode', e)} disabled={isLoading} style={{ minWidth: '50px' }}>
+                    {aiMode === 'Ask' && <ChatBubbleIcon size={16} />}
+                    {aiMode === 'Agent' && <InfinityIcon size={16} />}
+                    <DropdownIcon size={12} className={`arrow ${activeDropdown === 'mode' ? 'open' : ''}`} />
+                  </button>
+                </div>
+                <div className="model-dropdown-container">
+                  <button className="ai-model-select" onClick={(e) => !isLoading && handleOpenDropdown('model', e)} disabled={isLoading}>
+                    <span>{selectedModel}</span>
+                    <DropdownIcon size={12} className={`arrow ${activeDropdown === 'model' ? 'open' : ''}`} />
+                  </button>
+                </div>
+              </div>
+              <div className="ai-input-footer-right">
+                <button className="ai-toolbar-btn" title="Add Context (+)" onClick={() => console.log('File add')}><PaperclipIcon size={16} /></button>
+                <button className="ai-toolbar-btn" title="Voice Input"><MicIcon size={16} /></button>
+                <button className="ai-send-btn" onClick={() => handleSend()} disabled={!isLoading && !input.trim()} title={isLoading ? "Stop" : "Send"}>
+                  {isLoading ? <div style={{ width: '10px', height: '10px', backgroundColor: 'white', borderRadius: '2px' }} /> : <SendIcon size={14} />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  let displayTitle = projectName;
+  if (!projectName || projectName === 'Gluon') {
+    if (user) { displayTitle = `무엇을 도와드릴까요, ${user.full_name || user.email?.split('@')[0] || 'User'}님?`; }
+    else { displayTitle = "Quark AI를 사용하려면\n로그인이 필요합니다"; }
+  }
+
+  // Header Logic
+  let headerTitle = "";
+  if (messages.length > 0) {
+    const firstUserMessage = messages.find(msg => msg.role === 'user');
+    if (firstUserMessage) {
+      headerTitle = firstUserMessage.content.substring(0, 30) + (firstUserMessage.content.length > 30 ? '...' : '');
+    } else { headerTitle = "새로운 대화"; }
+  }
+
+  // Render History List (In-Place)
+  const renderHistoryView = () => (
+    <div className="history-view-container">
+      <div style={{ padding: '0 var(--spacing-md)', marginBottom: '8px' }}>
+        <h3 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)', margin: '16px 0 8px 0' }}>Chat History</h3>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>Select a conversation to continue</p>
+      </div>
+
+      <div className="history-list">
+        {chatHistory.length === 0 ? (
+          <div className="history-empty">
+            <HistoryIcon size={48} style={{ opacity: 0.2 }} />
+            <p>No chat history found</p>
+          </div>
+        ) : (
+          chatHistory.map(session => (
+            <div
+              key={session.id}
+              className={`history-item ${session.id === sessionId && !showHistory ? 'active' : ''}`} // Active logic
+              onClick={() => handleLoadSession(session.id)}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                <div className="history-title" style={{ flex: 1 }}>{session.title}</div>
+                <button
+                  onClick={(e) => handleDeleteSession(e, session.id)}
+                  title="Delete"
+                  className="history-delete-btn"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    padding: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    opacity: 0.6,
+                    transition: 'opacity 0.2s, color 0.2s'
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = '#e74c3c'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.opacity = '0.6'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                >
+                  <TrashIcon size={14} />
+                </button>
+              </div>
+              <div className="history-date">
+                <span>{new Date(session.timestamp).toLocaleDateString()} {new Date(session.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="ai-panel">
+      {/* Header */}
+      <div className="ai-panel-header">
+        <div className="ai-panel-title">
+          <h3 style={{
+            fontSize: '15px',
+            fontWeight: '800',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: '300px',
+            background: 'linear-gradient(135deg, #C792EA 0%, #89DDFF 100%)',
+            backgroundClip: 'text',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            letterSpacing: '1px',
+            filter: 'drop-shadow(0 0 2px rgba(137, 221, 255, 0.3))'
+          }}>
+            {showHistory ? 'History' : headerTitle}
+          </h3>
+        </div>
+        <div className="ai-header-actions">
+          {user && (
+            <>
+              <button className="icon-button" onClick={() => { handleNewChat(); }} title="New Chat" style={{ color: '#89DDFF' }}>
+                <PlusIcon size={16} />
+              </button>
+              <button
+                className="icon-button"
+                onClick={toggleHistory}
+                title="History"
+                style={showHistory ? { color: 'var(--text-primary)', backgroundColor: 'var(--bg-hover)' } : {}}
+              >
+                <HistoryIcon size={16} />
+              </button>
+            </>
+          )}
+          <button className="close-button" onClick={onClose} title="Close (Ctrl+L)">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      {showHistory ? renderHistoryView() : (
+        messages.length === 0 ? (
+          // Empty State Layout
+          // Empty State Layout
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 20px', gap: '24px', marginTop: '-40px' }}>
+            <div style={{ width: '100%', maxWidth: '600px' }}>
+              {user ? (
+                <>
+                  <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+                    <h2 style={{
+                      fontSize: '28px',
+                      fontWeight: '800',
+                      background: 'linear-gradient(135deg, #ffffff 0%, #89DDFF 100%)',
+                      backgroundClip: 'text',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      margin: 0,
+                      letterSpacing: '0.5px',
+                    }}>
+                      Hello, {user.full_name?.split(' ')[0] || 'Captain'}
+                    </h2>
+                    <p style={{ color: 'var(--text-secondary)', marginTop: '8px', fontSize: '14px' }}>
+                      How can I facilitate your coding journey?
+                    </p>
+                  </div>
+                  {renderInputArea()}
+                </>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                  <div style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '50%',
+                    background: 'var(--bg-tertiary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: '16px',
+                    border: '1px solid var(--border-color)'
+                  }}>
+                    <InfinityIcon size={32} style={{ color: 'var(--accent-blue)' }} />
+                  </div>
+                  <button
+                    onClick={() => useAuthStore.getState().login()}
+                    className="ai-login-button"
+                    style={{
+                      padding: '10px 24px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: 'var(--accent-blue)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.2s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--accent-blue-hover)'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--accent-blue)'}
+                  >
+                    <ChatBubbleIcon size={16} />
+                    <span>Sign in with Gluon</span>
+                  </button>
+                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', opacity: 0.7 }}>
+                    Cloud-powered AI navigation
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          // Active Chat Layout
+          <>
+            <div className="ai-messages">
+              {messages.map((message) => (
+                <div key={message.id} className={`ai-message ai-message-${message.role}`}>
+                  {message.role === 'assistant' && !message.content && isLoading ? (
+                    <div className="ai-message-content ai-thinking-wave"><span className="wave-dot"></span><span className="wave-dot"></span><span className="wave-dot"></span></div>
+                  ) : (
+                    <div className="ai-message-content group">
+                      <MarkdownRenderer
+                        content={message.content || ''}
+                        onRunCode={!isLoading && aiMode === 'Agent' ? handleRunCode : undefined}
+                        onApprove={!isLoading ? handleApproveAction : undefined}
+                      />
+                      {message.role === 'user' && !isLoading && (
+                        <button className="resend-button" onClick={() => handleSend(message.content)} title="Resend"><RotateCcwIcon size={12} /></button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+            {renderInputArea()}
+          </>
+        )
+      )}
+
+      {/* Floating Dropdown (Always rendered but conditional logic inside handles visibility) */}
+      {renderFloatingDropdown()}
+    </div>
+  );
+}
+
+export default AIPanel;
