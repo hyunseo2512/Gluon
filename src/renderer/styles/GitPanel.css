@@ -378,7 +378,7 @@
 }
 
 .git-custom-select:hover {
-    border-color: var(--accent-color);
+    border-color: var(--accent-blue);
 }
 
 .git-branch-name {
@@ -423,8 +423,8 @@
 }
 
 .git-dropdown-item.active {
-    color: var(--accent-color);
-    background-color: rgba(64, 169, 255, 0.1);
+    color: var(--accent-blue);
+    background-color: rgba(0, 191, 255, 0.1);
 }
 
 /* Notification Modal (Centered) */
@@ -505,8 +505,8 @@
 }
 
 .git-modal {
-    background-color: var(--bg-tertiary);
-    /* VS Code Editor Widget bg */
+    background-color: var(--bg-secondary);
+    /* IDE 테마색 */
     width: 400px;
     padding: 20px;
     border-radius: 6px;
@@ -573,7 +573,7 @@
 }
 
 .git-input:focus {
-    border-color: var(--accent-color);
+    border-color: var(--accent-blue);
 }
 
 .git-modal-actions {
@@ -601,7 +601,7 @@
 }
 
 .git-modal-actions .confirm-btn {
-    background-color: var(--accent-color);
+    background-color: var(--accent-blue);
     color: white;
 }
 

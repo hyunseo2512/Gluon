@@ -41,8 +41,8 @@
 }
 
 .app-logo {
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   object-fit: contain;
   cursor: pointer;
   margin-left: 6px;
@@ -590,19 +590,9 @@
   color: var(--text-primary);
 }
 
-/* Custom Tooltip */
+/* Custom Tooltip - Disabled */
 .custom-tooltip {
-  background-color: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-  pointer-events: none;
-  animation: tooltipFadeIn 0.15s ease;
+  display: none !important;
 }
 
 @keyframes tooltipFadeIn {
@@ -615,4 +605,126 @@
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* ========== Common Context Menu Styles ========== */
+.context-menu {
+  position: fixed;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 10000;
+  min-width: 160px;
+  padding: 4px 0;
+  animation: contextMenuFadeIn 0.1s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.context-menu-item {
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.1s;
+}
+
+.context-menu-item:hover {
+  background-color: var(--accent-blue);
+  color: #ffffff;
+}
+
+.context-menu-item.disabled {
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 4px 0;
+}
+
+/* ========== Monaco Editor Context Menu Override ========== */
+.monaco-menu,
+.shadow-root-host .monaco-menu,
+.context-view .monaco-menu,
+.monaco-editor .context-view .monaco-menu,
+.monaco-editor-overlaymessage,
+.monaco-menu-container {
+  background-color: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+.context-view.monaco-menu-container {
+  background-color: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 6px !important;
+}
+
+.monaco-menu .monaco-action-bar.vertical,
+.monaco-action-bar.vertical {
+  background-color: transparent !important;
+}
+
+.monaco-menu .action-item,
+.monaco-action-bar .action-item {
+  background-color: transparent !important;
+}
+
+.monaco-menu .action-item .action-label,
+.monaco-action-bar .action-item .action-label {
+  color: var(--text-primary) !important;
+  font-size: 13px !important;
+}
+
+.monaco-menu .action-item:hover,
+.monaco-menu .action-item.focused,
+.monaco-action-bar .action-item:hover,
+.monaco-action-bar .action-item.focused {
+  background-color: var(--accent-blue) !important;
+}
+
+.monaco-menu .action-item:hover .action-label,
+.monaco-menu .action-item.focused .action-label,
+.monaco-action-bar .action-item:hover .action-label,
+.monaco-action-bar .action-item.focused .action-label {
+  color: #ffffff !important;
+}
+
+.monaco-menu .action-item.disabled .action-label,
+.monaco-action-bar .action-item.disabled .action-label {
+  color: var(--text-tertiary) !important;
+}
+
+.monaco-menu .monaco-menu-separator,
+.monaco-action-bar .action-item.separator {
+  background-color: var(--border-color) !important;
+  border: none !important;
+}
+
+.monaco-menu .keybinding,
+.monaco-action-bar .keybinding {
+  color: var(--text-secondary) !important;
+}
+
+.monaco-menu .action-item:hover .keybinding,
+.monaco-menu .action-item.focused .keybinding {
+  color: rgba(255, 255, 255, 0.8) !important;
 }

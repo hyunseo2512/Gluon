@@ -78,7 +78,7 @@ class ErrorBoundary extends Component<Props, State> {
             return (
                 <div className="error-boundary-overlay">
                     <div className="error-modal">
-                        <h2>⚠️ Application Crashed</h2>
+                        <h2>Application Crashed</h2>
                         <p>Something went wrong. The application will close in <strong>{this.state.countdown}</strong> seconds to prevent data corruption.</p>
 
                         <div className="error-details">
@@ -87,7 +87,7 @@ class ErrorBoundary extends Component<Props, State> {
 
                         <div className="error-actions">
                             <button className="report-btn" onClick={this.handleReport}>
-                                📩 Copy & Report Issue
+                                Copy & Report Issue
                             </button>
                             <button className="close-btn" onClick={this.forceClose}>
                                 Close Now

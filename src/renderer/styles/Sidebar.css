@@ -34,13 +34,3 @@
 .sidebar-button.active {
   color: #ffffff;
 }
-
-.sidebar-button.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background-color: var(--accent-blue);
-}

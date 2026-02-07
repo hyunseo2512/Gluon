@@ -1,10 +1,9 @@
 import '../styles/Sidebar.css';
-import { FolderIcon, SearchIcon, GitIcon, ExtensionsIcon, UserIcon } from './Icons';
-import { useAuthStore } from '../store/authStore';
+import { FolderIcon, SearchIcon, GitIcon } from './Icons';
 
 interface SidebarProps {
-  activeView: 'explorer' | 'search' | 'git' | 'extensions';
-  onViewChange: (view: 'explorer' | 'search' | 'git' | 'extensions') => void;
+  activeView: 'explorer' | 'search' | 'git';
+  onViewChange: (view: 'explorer' | 'search' | 'git') => void;
   isSidePanelOpen: boolean;
   onToggleSidebar: () => void;
 }
@@ -13,8 +12,7 @@ interface SidebarProps {
  * VS Code 스타일 왼쪽 액티비티 바
  */
 function Sidebar({ activeView, onViewChange, isSidePanelOpen, onToggleSidebar }: SidebarProps) {
-  const { user, login } = useAuthStore();
-  const handleViewClick = (view: 'explorer' | 'search' | 'git' | 'extensions') => {
+  const handleViewClick = (view: 'explorer' | 'search' | 'git') => {
     // 사이드 패널이 닫혀있거나, 열려있지만 다른 뷰인 경우 → 해당 뷰로 전환
     if (!isSidePanelOpen || activeView !== view) {
       onViewChange(view);
@@ -52,14 +50,6 @@ function Sidebar({ activeView, onViewChange, isSidePanelOpen, onToggleSidebar }:
         data-tooltip-pos="right"
       >
         <GitIcon size={24} />
-      </button>
-      <button
-        className={`sidebar-button ${activeView === 'extensions' && isSidePanelOpen ? 'active' : ''}`}
-        onClick={() => handleViewClick('extensions')}
-        data-tooltip="확장"
-        data-tooltip-pos="right"
-      >
-        <ExtensionsIcon size={24} />
       </button>
       <div className="sidebar-bottom">
 

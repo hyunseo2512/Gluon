@@ -78,7 +78,7 @@ function SearchPanel({ workspaceDir, onFileOpen }: SearchPanelProps) {
                     onChange={(e) => setQuery(e.target.value)}
                     autoFocus
                 />
-                {isSearching && <div className="search-spinner">🔍</div>}
+                {isSearching && <div className="search-spinner">...</div>}
             </div>
 
             {error && <div className="search-error">{error}</div>}

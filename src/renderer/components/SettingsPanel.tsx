@@ -6,50 +6,12 @@ import '../styles/SettingsPanel.css';
 
 interface SettingsPanelProps {
   onClose: () => void;
+  onOpenSettingsJson?: (filePath: string) => void;
 }
 
-type SettingsTab = 'editor' | 'extensions' | 'github' | 'eden' | 'shortcuts';
+type SettingsTab = 'editor' | 'github' | 'eden' | 'shortcuts';
 
-interface Extension {
-  id: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  installed: boolean;
-}
-
-const AVAILABLE_EXTENSIONS: Extension[] = [
-  {
-    id: 'prettier',
-    name: 'Prettier',
-    description: 'Code formatter using prettier',
-    enabled: false,
-    installed: false,
-  },
-  {
-    id: 'eslint',
-    name: 'ESLint',
-    description: 'JavaScript linter',
-    enabled: false,
-    installed: false,
-  },
-  {
-    id: 'python',
-    name: 'Python',
-    description: 'Python language support',
-    enabled: false,
-    installed: false,
-  },
-  {
-    id: 'rust',
-    name: 'Rust',
-    description: 'Rust language support',
-    enabled: false,
-    installed: false,
-  },
-];
-
-function SettingsPanel({ onClose }: SettingsPanelProps) {
+function SettingsPanel({ onClose, onOpenSettingsJson }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('editor');
   const [editorSettings, setEditorSettings] = useState<EditorSettings>(DEFAULT_EDITOR_SETTINGS);
   const [githubSettings, setGithubSettings] = useState({
@@ -59,13 +21,35 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [edenSettings, setEdenSettings] = useState({
     serverUrl: 'https://quark.panthera-karat.ts.net:8000'
   });
-  const [extensions, setExtensions] = useState<Extension[]>(AVAILABLE_EXTENSIONS);
   const [shortcuts, setShortcuts] = useState<KeyBinding[]>(DEFAULT_SHORTCUTS);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
-    // 저장된 설정 불러오기
     const loadSettings = async () => {
+      // settings.json에서 에디터 설정 읽기
+      try {
+        const result = await window.electron.settings.read();
+        if (result.success && result.data) {
+          const jsonSettings = result.data as Record<string, unknown>;
+          const settings: Partial<EditorSettings> = {};
+          if (jsonSettings['editor.fontSize'] !== undefined) settings.fontSize = jsonSettings['editor.fontSize'] as number;
+          if (jsonSettings['editor.fontFamily'] !== undefined) settings.fontFamily = jsonSettings['editor.fontFamily'] as string;
+          if (jsonSettings['editor.fontLigatures'] !== undefined) settings.fontLigatures = jsonSettings['editor.fontLigatures'] as boolean;
+          if (jsonSettings['editor.tabSize'] !== undefined) settings.tabSize = jsonSettings['editor.tabSize'] as number;
+          if (jsonSettings['editor.insertSpaces'] !== undefined) settings.insertSpaces = jsonSettings['editor.insertSpaces'] as boolean;
+          if (jsonSettings['editor.wordWrap'] !== undefined) settings.wordWrap = jsonSettings['editor.wordWrap'] as boolean;
+          if (jsonSettings['editor.minimap'] !== undefined) settings.minimap = jsonSettings['editor.minimap'] as boolean;
+          if (jsonSettings['editor.lineNumbers'] !== undefined) settings.lineNumbers = jsonSettings['editor.lineNumbers'] as boolean;
+          if (jsonSettings['editor.formatOnSave'] !== undefined) settings.formatOnSave = jsonSettings['editor.formatOnSave'] as boolean;
+          if (jsonSettings['editor.theme'] !== undefined) settings.theme = jsonSettings['editor.theme'] as string;
+          if (jsonSettings['editor.defaultFormatter'] !== undefined) settings.defaultFormatter = jsonSettings['editor.defaultFormatter'] as string;
+          setEditorSettings({ ...DEFAULT_EDITOR_SETTINGS, ...settings });
+        }
+      } catch (e) {
+        console.error('Failed to load settings.json:', e);
+      }
+
       const user = await window.electron.store.get('github_username');
       const token = await window.electron.store.get('github_token');
       const serverUrl = await window.electron.store.get('eden_server_url');
@@ -87,19 +71,36 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
         });
         setShortcuts(merged);
       }
+
+      // 초기 로딩 완료 - 이제 저장 허용
+      setIsInitialLoad(false);
     };
     loadSettings();
   }, []);
 
-  // Save editor settings whenever they change
+  // settings.json에 저장 (초기 로딩 시 건너뛰기)
   useEffect(() => {
-    window.electron.store.set('editor_settings', editorSettings);
-  }, [editorSettings]);
+    if (isInitialLoad) return; // 초기 로딩 시 저장 안함
 
-  // Save extension settings whenever they change
+    const jsonSettings = {
+      'editor.fontSize': editorSettings.fontSize,
+      'editor.fontFamily': editorSettings.fontFamily,
+      'editor.fontLigatures': editorSettings.fontLigatures,
+      'editor.tabSize': editorSettings.tabSize,
+      'editor.insertSpaces': editorSettings.insertSpaces,
+      'editor.wordWrap': editorSettings.wordWrap,
+      'editor.minimap': editorSettings.minimap,
+      'editor.lineNumbers': editorSettings.lineNumbers,
+      'editor.theme': editorSettings.theme,
+      'editor.formatOnSave': editorSettings.formatOnSave,
+      'editor.defaultFormatter': editorSettings.defaultFormatter,
+    };
+    window.electron.settings.write(jsonSettings);
+  }, [editorSettings, isInitialLoad]);
+
   useEffect(() => {
-    window.electron.store.set('extensions', extensions);
-  }, [extensions]);
+    window.electron.store.set('key_bindings', shortcuts);
+  }, [shortcuts]);
 
   const handleEditorSettingChange = (key: keyof EditorSettings, value: any) => {
     setEditorSettings((prevSettings) => ({
@@ -107,26 +108,6 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
       [key]: value,
     }));
   };
-
-  const handleExtensionInstall = (id: string) => {
-    setExtensions((prevExtensions) =>
-      prevExtensions.map((ext) =>
-        ext.id === id ? { ...ext, installed: !ext.installed, enabled: !ext.installed ? true : ext.enabled } : ext
-      )
-    );
-  };
-
-  const handleExtensionToggle = (id: string) => {
-    setExtensions((prevExtensions) =>
-      prevExtensions.map((ext) =>
-        ext.id === id ? { ...ext, enabled: !ext.enabled } : ext
-      )
-    );
-  };
-
-  useEffect(() => {
-    window.electron.store.set('key_bindings', shortcuts);
-  }, [shortcuts]);
 
   const handleKeyDown = (e: React.KeyboardEvent, id: string) => {
     e.preventDefault();
@@ -179,12 +160,6 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
             Editor
           </button>
           <button
-            className={`settings-tab ${activeTab === 'extensions' ? 'active' : ''}`}
-            onClick={() => setActiveTab('extensions')}
-          >
-            Extensions
-          </button>
-          <button
             className={`settings-tab ${activeTab === 'github' ? 'active' : ''}`}
             onClick={() => setActiveTab('github')}
           >
@@ -194,7 +169,7 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
             className={`settings-tab ${activeTab === 'eden' ? 'active' : ''}`}
             onClick={() => setActiveTab('eden')}
           >
-            Quark AI
+            Quark
           </button>
           <button
             className={`settings-tab ${activeTab === 'shortcuts' ? 'active' : ''}`}
@@ -209,10 +184,10 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
           {activeTab === 'shortcuts' && (
             <div className="settings-section">
               <h3>Key Bindings</h3>
-              <div className="shortcuts-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className="shortcuts-list">
                 {shortcuts.map((shortcut) => (
-                  <div key={shortcut.id} className="setting-item" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ flex: 1 }}>
+                  <div key={shortcut.id} className="shortcut-item">
+                    <div className="shortcut-description">
                       <span className="setting-label">{shortcut.description}</span>
                     </div>
                     <div
@@ -220,26 +195,16 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                       onClick={() => setEditingId(shortcut.id)}
                       onKeyDown={(e) => editingId === shortcut.id && handleKeyDown(e, shortcut.id)}
                       tabIndex={0}
-                      style={{
-                        padding: '4px 12px',
-                        background: editingId === shortcut.id ? '#0e639c' : '#3c3c3c',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        minWidth: '80px',
-                        textAlign: 'center',
-                        color: 'white',
-                        border: editingId === shortcut.id ? '1px solid white' : '1px solid transparent'
-                      }}
                     >
                       {editingId === shortcut.id ? 'Press keys...' : shortcut.currentKey}
                     </div>
                     {shortcut.currentKey !== shortcut.defaultKey && (
                       <button
+                        className="shortcut-reset-btn"
                         onClick={(e) => {
                           e.stopPropagation();
                           setShortcuts(prev => prev.map(s => s.id === shortcut.id ? { ...s, currentKey: s.defaultKey } : s));
                         }}
-                        style={{ marginLeft: '8px', background: 'transparent', border: 'none', color: '#cccccc', cursor: 'pointer' }}
                         title="Reset to default"
                       >
                         ↺
@@ -248,16 +213,37 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </div>
                 ))}
               </div>
+              <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  className="shortcut-reset-all-btn"
+                  onClick={() => {
+                    setShortcuts(DEFAULT_SHORTCUTS.map(s => ({ ...s })));
+                  }}
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    color: 'var(--text-secondary)',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.borderColor = 'var(--accent-blue)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--border-color)'; }}
+                >
+                  Reset All to Defaults
+                </button>
+              </div>
             </div>
           )}
 
           {activeTab === 'eden' && (
             <div className="settings-section">
-              <h3>Quark AI Configuration</h3>
+              <h3>Quark Configuration</h3>
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Quark Server URL</span>
-                  <span className="setting-description">Address of your Quark AI server (e.g., http://192.168.0.5:8000)</span>
                 </label>
                 <input
                   type="text"
@@ -272,13 +258,10 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                   onClick={async () => {
                     let urlToSave = edenSettings.serverUrl;
                     try {
-                      // URL 정제 (Origin만 추출)
                       const urlObj = new URL(urlToSave);
                       urlToSave = urlObj.origin;
-                      // 상태 업데이트 (UI에도 반영)
                       setEdenSettings({ ...edenSettings, serverUrl: urlToSave });
                     } catch (e) {
-                      // 파싱 실패 시 기본 로직 (끝 슬래시 제거, http 추가)
                       urlToSave = urlToSave.replace(/\/$/, '');
                       if (!urlToSave.startsWith('http')) {
                         urlToSave = `https://${urlToSave}`;
@@ -299,18 +282,11 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Auth Token</span>
-                  <span className="setting-description">Paste the token from the browser login screen here</span>
                 </label>
                 <input
                   type="password"
                   placeholder="Paste your token here..."
-                  onChange={async (e) => {
-                    // 입력 즉시 임시 저장 (State 불필요)
-                    // 실제로는 버튼 누를 때 처리하는게 좋지만, 간단하게 구현
-                    // 여기서는 state를 안 만들었으므로 input ref나 로컬 변수 필요하지만
-                    // 간단히 value를 직접 다루거나, 아래 버튼 로직에서 prompt를 띄우는게 나을 수도 있음.
-                    // 하지만 UX상 input이 좋음.
-                  }}
+                  onChange={async (e) => { }}
                   id="manual-token-input"
                 />
               </div>
@@ -327,28 +303,25 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                     }
 
                     try {
-                      // 1. 토큰 저장
                       await window.electron.store.set('token', token);
-                      // 2. AuthStore 갱신 요청
                       const { useAuthStore } = await import('../store/authStore');
                       await useAuthStore.getState().checkAuth();
 
                       const currentUser = useAuthStore.getState().user;
 
                       if (currentUser) {
-                        alert(`✅ Login Successful! Welcome, ${currentUser.full_name || currentUser.email}`);
+                        alert(`Login Successful! Welcome, ${currentUser.full_name || currentUser.email}`);
                         onClose();
                       } else {
-                        // 토큰은 저장됐지만 유저 로드 실패
                         const state = useAuthStore.getState();
                         const serverUrl = state.backendUrl || 'Unknown URL';
                         const errorMsg = state.authError || 'Unknown Network Error';
 
-                        alert(`⚠️ Login Failed!\n\nError Details: ${errorMsg}\n\nServer URL: ${serverUrl}\n\nPlease verify:\n1. The server is running (port 8000)\n2. The URL in settings is correct`);
+                        alert(`Login Failed!\n\nError Details: ${errorMsg}\n\nServer URL: ${serverUrl}\n\nPlease verify:\n1. The server is running (port 8000)\n2. The URL in settings is correct`);
                       }
                     } catch (error: any) {
                       console.error(error);
-                      alert(`❌ System Error: ${error.message}`);
+                      alert(`System Error: ${error.message}`);
                     }
                   }}
                 >
@@ -362,11 +335,9 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
             <div className="settings-section">
               <h3>Editor Settings</h3>
 
-              {/* Font Size */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Font Size</span>
-                  <span className="setting-description">Controls the font size in pixels</span>
                 </label>
                 <input
                   type="number"
@@ -377,11 +348,9 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
 
-              {/* Tab Size */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Tab Size</span>
-                  <span className="setting-description">The number of spaces a tab is equal to</span>
                 </label>
                 <input
                   type="number"
@@ -392,11 +361,9 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
 
-              {/* Insert Spaces */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Insert Spaces</span>
-                  <span className="setting-description">Insert spaces when pressing Tab</span>
                 </label>
                 <input
                   type="checkbox"
@@ -405,11 +372,9 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
 
-              {/* Word Wrap */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Word Wrap</span>
-                  <span className="setting-description">Controls how lines should wrap</span>
                 </label>
                 <input
                   type="checkbox"
@@ -418,11 +383,9 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
 
-              {/* Minimap */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Minimap</span>
-                  <span className="setting-description">Controls whether the minimap is shown</span>
                 </label>
                 <input
                   type="checkbox"
@@ -431,11 +394,9 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
 
-              {/* Line Numbers */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Line Numbers</span>
-                  <span className="setting-description">Controls the display of line numbers</span>
                 </label>
                 <input
                   type="checkbox"
@@ -444,27 +405,21 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
 
-              {/* Theme */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Theme</span>
-                  <span className="setting-description">Color theme for the editor</span>
                 </label>
                 <select
                   value={editorSettings.theme}
                   onChange={(e) => handleEditorSettingChange('theme', e.target.value)}
                 >
-                  <option value="vs-dark">Dark</option>
-                  <option value="vs-light">Light</option>
-                  <option value="hc-black">High Contrast</option>
+                  <option value="gluon">Gluon</option>
                 </select>
               </div>
 
-              {/* Format On Save */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Format On Save</span>
-                  <span className="setting-description">Format the file automatically when saving</span>
                 </label>
                 <input
                   type="checkbox"
@@ -473,64 +428,36 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
 
-              {/* Default Formatter */}
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Default Formatter</span>
-                  <span className="setting-description">Formatter to use</span>
                 </label>
                 <select
                   value={editorSettings.defaultFormatter}
                   onChange={(e) => handleEditorSettingChange('defaultFormatter', e.target.value)}
                 >
-                  <option value="default">Monaco Built-in (Default)</option>
-                  <option value="prettier">Prettier (if available)</option>
                   <option value="none">None</option>
                 </select>
               </div>
-            </div>
-          )}
 
-          {activeTab === 'extensions' && (
-            <div className="settings-section">
-              <h3>Extensions</h3>
+              {/* Divider */}
+              <div className="setting-divider" style={{ margin: '20px 0', borderBottom: '1px solid var(--border-color)' }}></div>
 
-              <div className="extensions-list">
-                {extensions.map((ext) => (
-                  <div key={ext.id} className="extension-item">
-                    <div className="extension-info">
-                      <h4>{ext.name}</h4>
-                      <p>{ext.description}</p>
-                    </div>
-                    <div className="extension-actions">
-                      {ext.installed ? (
-                        <>
-                          <label className="extension-toggle">
-                            <input
-                              type="checkbox"
-                              checked={ext.enabled}
-                              onChange={() => handleExtensionToggle(ext.id)}
-                            />
-                            <span>Enabled</span>
-                          </label>
-                          <button
-                            className="extension-button uninstall"
-                            onClick={() => handleExtensionInstall(ext.id)}
-                          >
-                            Uninstall
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="extension-button install"
-                          onClick={() => handleExtensionInstall(ext.id)}
-                        >
-                          Install
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+              {/* Open Settings JSON Button */}
+              <div className="setting-item" style={{ justifyContent: 'flex-start' }}>
+                <button
+                  className="save-button"
+                  style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}
+                  onClick={async () => {
+                    if (onOpenSettingsJson) {
+                      const settingsPath = await window.electron.settings.getPath();
+                      onOpenSettingsJson(settingsPath);
+                      onClose();
+                    }
+                  }}
+                >
+                  Open Settings (JSON)
+                </button>
               </div>
             </div>
           )}
@@ -541,7 +468,6 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Username</span>
-                  <span className="setting-description">Your GitHub username</span>
                 </label>
                 <input
                   type="text"
@@ -553,7 +479,6 @@ function SettingsPanel({ onClose }: SettingsPanelProps) {
               <div className="setting-item">
                 <label>
                   <span className="setting-label">Personal Access Token</span>
-                  <span className="setting-description">Token with 'repo' scope</span>
                 </label>
                 <input
                   type="password"

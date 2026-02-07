@@ -24,32 +24,31 @@
   /* Stardust Grey */
 
   /* Neon Accents (Event Horizon / Photons) */
-  --accent-blue: #89DDFF;
-  /* Neon Cyan (Observer) */
-  --accent-purple: #C792EA;
-  /* Neon Violet (Uncertainty) */
-  --accent-cyan: #89DDFF;
-  /* Cyan */
-  --accent-green: #C3E88D;
-  /* Bio Green */
-  --accent-yellow: #FFCB6B;
-  /* Stellar Gold */
-  --accent-red: #FF5370;
-  /* Red Shift */
+  --accent-blue: #00BFFF;
+  /* Neon Electric Blue */
+  --accent-purple: #BB86FC;
+  /* Neon Violet */
+  --accent-cyan: #00BFFF;
+  /* Neon Electric Blue */
+  --accent-green: #8FB870;
+  /* Muted Green */
+  --accent-yellow: #D4A85A;
+  /* Muted Gold */
+  --accent-red: #CC5566;
 
   /* App Color Mapping */
   --bg-primary: #0B0C15;
   --bg-secondary: #0F111A;
   /* Slightly lighter than primary */
   --bg-tertiary: #1A1C29;
-  --bg-hover: rgba(137, 221, 255, 0.1);
+  --bg-hover: rgba(59, 139, 255, 0.15);
 
   --text-primary: #E0E0E0;
   --text-secondary: #A0AABF;
   --text-tertiary: #546E7A;
 
-  --border-color: rgba(137, 221, 255, 0.08);
-  /* Faint Force Field */
+  --border-color: #1A1B26;
+  /* Subtle Dark Border */
   --shadow: rgba(0, 0, 0, 0.8);
 
   /* Spacing */

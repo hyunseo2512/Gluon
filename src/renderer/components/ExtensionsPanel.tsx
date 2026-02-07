@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import '../styles/ExtensionsPanel.css';
+import ConfirmModal from './ConfirmModal';
 
 interface Extension {
   id: string;
@@ -58,6 +59,7 @@ const RECOMMENDED_EXTENSIONS: Extension[] = [
 function ExtensionsPanel() {
   const [extensions, setExtensions] = useState<Extension[]>(RECOMMENDED_EXTENSIONS);
   const [searchQuery, setSearchQuery] = useState('');
+  const [uninstallTarget, setUninstallTarget] = useState<Extension | null>(null);
 
   // Check installation status on mount
   useEffect(() => {
@@ -113,14 +115,19 @@ function ExtensionsPanel() {
     }
   };
 
-  const handleUninstall = async (id: string) => {
+  const handleUninstall = (id: string) => {
     const ext = extensions.find((e) => e.id === id);
     if (!ext) return;
+    setUninstallTarget(ext);
+  };
 
-    if (!confirm(`${ext.name}을(를) 제거하시겠습니까?`)) return;
+  const doUninstall = async () => {
+    if (!uninstallTarget) return;
+    const ext = uninstallTarget;
+    setUninstallTarget(null);
 
     setExtensions((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, installing: true } : e))
+      prev.map((e) => (e.id === ext.id ? { ...e, installing: true } : e))
     );
 
     try {
@@ -128,19 +135,19 @@ function ExtensionsPanel() {
       if (result.success) {
         setExtensions((prev) =>
           prev.map((e) =>
-            e.id === id ? { ...e, installed: false, installing: false } : e
+            e.id === ext.id ? { ...e, installed: false, installing: false } : e
           )
         );
       } else {
         alert(`제거 실패: ${result.error}`);
         setExtensions((prev) =>
-          prev.map((e) => (e.id === id ? { ...e, installing: false } : e))
+          prev.map((e) => (e.id === ext.id ? { ...e, installing: false } : e))
         );
       }
     } catch (error: any) {
       alert(`제거 중 오류: ${error.message}`);
       setExtensions((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, installing: false } : e))
+        prev.map((e) => (e.id === ext.id ? { ...e, installing: false } : e))
       );
     }
   };
@@ -208,6 +215,17 @@ function ExtensionsPanel() {
           ))
         )}
       </div>
+
+      {/* 제거 확인 모달 */}
+      <ConfirmModal
+        isOpen={!!uninstallTarget}
+        title="확장 제거"
+        message={`${uninstallTarget?.name || ''}을(를) 제거하시겠습니까?`}
+        confirmText="제거"
+        variant="delete"
+        onConfirm={doUninstall}
+        onCancel={() => setUninstallTarget(null)}
+      />
     </div>
   );
 }

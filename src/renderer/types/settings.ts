@@ -1,5 +1,7 @@
 export interface EditorSettings {
     fontSize: number;
+    fontFamily: string;
+    fontLigatures: boolean;
     tabSize: number;
     insertSpaces: boolean;
     wordWrap: boolean;
@@ -12,12 +14,14 @@ export interface EditorSettings {
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
     fontSize: 14,
+    fontFamily: "'Fira Code', 'Consolas', monospace",
+    fontLigatures: true,
     tabSize: 2,
     insertSpaces: true,
     wordWrap: false,
     minimap: false,
     lineNumbers: true,
-    theme: 'vs-dark',
+    theme: 'gluon',
     formatOnSave: false,
-    defaultFormatter: 'default', // 'default' (Monaco), 'prettier', 'none'
+    defaultFormatter: 'none',
 };

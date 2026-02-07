@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import '../styles/FileExplorer.css';
-import { FolderIcon, FolderOpenIcon, FilePlusIcon, FolderPlusIcon, getIconForFile, RotateCcwIcon, XIcon } from './Icons';
+import { FolderIcon, FolderOpenIcon, FilePlusIcon, FolderPlusIcon, getIconForFile, getIconForFolder, RotateCcwIcon, XIcon } from './Icons';
+import ConfirmModal from './ConfirmModal';
 
 interface FileExplorerProps {
   workspaceDir: string | null;
@@ -8,6 +9,8 @@ interface FileExplorerProps {
   onCloseProject?: () => void;
   refreshKey?: number;
   onFileDelete?: (path: string) => void;
+  revealFilePath?: string | null;
+  onRevealComplete?: () => void;
 }
 
 interface FileNode {
@@ -22,7 +25,7 @@ interface FileNode {
 /**
  * 파일 탐색기 컴포넌트 - 실제 파일 시스템 연동
  */
-function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, onFileDelete }: FileExplorerProps) {
+function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, onFileDelete, revealFilePath, onRevealComplete }: FileExplorerProps) {
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null); // For range selection or context
@@ -43,12 +46,51 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
   const [clipboard, setClipboard] = useState<{ path: string; op: 'copy' | 'cut' } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: FileNode | null } | null>(null);
 
+  // Overwrite Confirm Modal State
+  const [overwriteModal, setOverwriteModal] = useState<{
+    isOpen: boolean;
+    sourceName: string;
+    onConfirm: () => void;
+  }>({ isOpen: false, sourceName: '', onConfirm: () => { } });
+
   // Close context menu on click outside
   useEffect(() => {
     const handleClick = () => setContextMenu(null);
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
   }, []);
+
+  // 파일 시스템 변경 감시
+  useEffect(() => {
+    if (!workspaceDir) return;
+
+    // 워치 시작
+    window.electron.fs.watch(workspaceDir);
+
+    // 디바운스 타이머
+    let debounceTimer: NodeJS.Timeout | null = null;
+
+    // 변경 이벤트 리스너
+    const unsubscribe = window.electron.fs.onWatchEvent((event) => {
+      console.log('[FileExplorer] Watch event:', event);
+
+      // 디바운스: 300ms 내 여러 이벤트 무시하고 마지막만 처리
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        console.log('[FileExplorer] Refreshing tree after debounce');
+        refreshDeep(workspaceDir);
+      }, 300);
+    });
+
+    // 클린업: 언마운트 시 워치 중지
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      unsubscribe();
+      window.electron.fs.unwatch(workspaceDir);
+    };
+  }, [workspaceDir]);
 
   const handleContextMenu = (e: React.MouseEvent, node: FileNode) => {
     e.preventDefault();
@@ -122,13 +164,8 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
       return;
     }
 
-    // Check Exists
-    try {
-      const exists = await window.electron.fs.exists(destPath);
-      if (exists.success && exists.exists) {
-        if (!confirm(`'${sourceName}' already exists. Overwrite?`)) return;
-      }
-
+    // Helper function for actual paste execution
+    const executePaste = async () => {
       if (clipboard.op === 'cut') {
         const result = await window.electron.fs.rename(clipboard.path, destPath);
         if (result.success) {
@@ -138,9 +175,6 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
             const treeAfterRemove = removeNodeFromTree(prev, clipboard.path);
 
             // 2. Prepare New Item
-            // Ensure we use info from the removed node if possible, or fallback
-            // We can find it in 'prev' before removal if we really want strict type matching
-            // But finding path in tree is cheap enough
             const sourceNode = findNode(prev, clipboard.path);
 
             const newItem: FileNode = {
@@ -152,14 +186,7 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
               children: (sourceNode && sourceNode.isDirectory) ? [] : undefined
             };
 
-            // If we have sourceNode children, we could assume they are moved too, 
-            // but we'd need to update ALL their paths. 
-            // Better to let them be lazy loaded or invalid.
-            // If it was a directory, children paths are now invalid. 
-            // So empty children is correct. User must expand to refresh.
             if (sourceNode && sourceNode.isDirectory) {
-              // If we keep children, their paths are wrong!
-              // So resetting children to [] (or undefined) is safer.
               newItem.children = [];
               newItem.isLoaded = false;
               newItem.isExpanded = false;
@@ -184,9 +211,6 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
         // Copy
         const result = await window.electron.fs.copy(clipboard.path, destPath);
         if (result.success) {
-          // Optimistic UI: Add Target
-          // We don't know type easily unless we read source.
-          // Let's try to find source node in tree.
           const sourceNode = findNode(fileTree, clipboard.path);
           const newItem: FileNode = {
             name: sourceName,
@@ -196,9 +220,6 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
             isLoaded: false,
             children: (sourceNode && sourceNode.isDirectory) ? [] : undefined
           };
-          // Copying folder usually requires recursive copy. `fs.copy` does simple copy or recursive?
-          // Assuming recursive. But UI won't show children unless we copy tree structure. 
-          // For Copy, maybe just Insert Node is enough, children will be loaded on expand.
 
           if (destDir === workspaceDir) {
             setFileTree(prev => [...prev, newItem].sort((a, b) => {
@@ -216,11 +237,29 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
       // Background Refresh Consistency
       setTimeout(async () => {
         if (workspaceDir) await refreshDeep(workspaceDir);
-        // Ensure destination expanded
         if (destDir !== workspaceDir) {
           await toggleDirectory(destDir, true);
         }
       }, 500);
+    };
+
+    // Check Exists
+    try {
+      const exists = await window.electron.fs.exists(destPath);
+      if (exists.success && exists.exists) {
+        // 덮어쓰기 확인 모달 표시
+        setOverwriteModal({
+          isOpen: true,
+          sourceName: sourceName,
+          onConfirm: async () => {
+            setOverwriteModal({ isOpen: false, sourceName: '', onConfirm: () => { } });
+            await executePaste();
+          }
+        });
+        return;
+      }
+
+      await executePaste();
 
     } catch (err) {
       console.error('Paste operation failed:', err);
@@ -289,7 +328,57 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
     }
   }, [workspaceDir]);
 
-  // 키보드 단축키 (F2: 이름 변경, Delete: 삭제, Ctrl+C/X/V: 복사/잘라내기/붙여넣기)
+  // Reveal file in explorer: 부모 폴더 확장 후 파일 선택 + 스크롤
+  useEffect(() => {
+    if (!revealFilePath || !workspaceDir) return;
+
+    const revealFile = async () => {
+      // workspaceDir 기준 상대 경로에서 부모 폴더 추출
+      const relativePath = revealFilePath.replace(workspaceDir + '/', '');
+      const parts = relativePath.split('/');
+
+      // 부모 폴더들을 순차적으로 확장
+      let currentPath = workspaceDir;
+      for (let i = 0; i < parts.length - 1; i++) {
+        currentPath += '/' + parts[i];
+        await toggleDirectory(currentPath, true); // forceState = true (확장)
+      }
+
+      // 약간의 딜레이 후 파일 선택 + 스크롤 (DOM 반영 대기)
+      setTimeout(() => {
+        setSelectedPaths(new Set([revealFilePath]));
+        setLastSelectedPath(revealFilePath);
+
+        const el = document.querySelector(`[data-filepath="${CSS.escape(revealFilePath)}"]`);
+        if (el) {
+          el.scrollIntoView({ block: 'nearest' });
+        }
+
+        onRevealComplete?.();
+      }, 150);
+    };
+
+    revealFile();
+  }, [revealFilePath]);
+
+  // Helper: 트리를 평탄화 (보이는 노드만, 확장된 폴더의 자식 포함)
+  const flattenTree = useCallback((nodes: FileNode[]): FileNode[] => {
+    const result: FileNode[] = [];
+    const traverse = (items: FileNode[]) => {
+      for (const node of items) {
+        result.push(node);
+        if (node.isDirectory && node.isExpanded && node.children) {
+          traverse(node.children);
+        }
+      }
+    };
+    traverse(nodes);
+    return result;
+  }, []);
+
+
+
+  // 키보드 단축키 (F2, Delete, Ctrl+C/X/V, Arrow, Enter)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // 입력 중일 때는 무시 (input, textarea)
@@ -316,6 +405,77 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
       } else if (e.key === 'Enter' && deleteTarget) {
         e.preventDefault();
         handleDeleteConfirm();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        // 파일 트리 키보드 네비게이션
+        const flatList = flattenTree(fileTree);
+        if (flatList.length === 0) return;
+        e.preventDefault();
+
+        const currentIndex = lastSelectedPath
+          ? flatList.findIndex(n => n.path === lastSelectedPath)
+          : -1;
+
+        let nextIndex: number;
+        if (e.key === 'ArrowDown') {
+          nextIndex = currentIndex < flatList.length - 1 ? currentIndex + 1 : 0;
+        } else {
+          nextIndex = currentIndex > 0 ? currentIndex - 1 : flatList.length - 1;
+        }
+
+        const nextNode = flatList[nextIndex];
+        setSelectedPaths(new Set([nextNode.path]));
+        setLastSelectedPath(nextNode.path);
+        setSelectedIsDirectory(nextNode.isDirectory);
+
+        // 스크롤 해당 요소로
+        const el = document.querySelector(`[data-filepath="${CSS.escape(nextNode.path)}"]`);
+        if (el) el.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter' && !deleteTarget && lastSelectedPath) {
+        // Enter: 파일 열기 / 폴더 토글
+        e.preventDefault();
+        const node = findNode(fileTree, lastSelectedPath);
+        if (node) {
+          if (node.isDirectory) {
+            toggleDirectory(node.path);
+          } else {
+            onFileOpen(node.path);
+          }
+        }
+      } else if (e.key === 'ArrowRight' && lastSelectedPath) {
+        // 폴더 펼치기
+        const node = findNode(fileTree, lastSelectedPath);
+        if (node && node.isDirectory && !node.isExpanded) {
+          e.preventDefault();
+          toggleDirectory(node.path);
+        }
+      } else if (e.key === 'ArrowLeft' && lastSelectedPath) {
+        // 폴더 접기
+        const node = findNode(fileTree, lastSelectedPath);
+        if (node && node.isDirectory && node.isExpanded) {
+          e.preventDefault();
+          toggleDirectory(node.path);
+        }
+      } else if (e.key === 'Insert' && !renamingPath && !isCreating.type) {
+        // Insert: 새 파일 생성
+        e.preventDefault();
+        let parentPath = workspaceDir;
+        if (lastSelectedPath) {
+          const node = findNode(fileTree, lastSelectedPath);
+          if (node) {
+            parentPath = node.isDirectory ? node.path : node.path.substring(0, node.path.lastIndexOf('/'));
+          }
+        }
+        if (parentPath) {
+          // 폴더가 닫혀있으면 자동 확장
+          if (parentPath !== workspaceDir) {
+            const parentNode = findNode(fileTree, parentPath);
+            if (parentNode && parentNode.isDirectory && !parentNode.isExpanded) {
+              toggleDirectory(parentPath, true);
+            }
+          }
+          setIsCreating({ type: 'file', parentPath });
+          setNewItemName('');
+        }
       }
 
       // Copy / Cut / Paste
@@ -324,7 +484,6 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
           // Copy
           if (selectedPaths.size > 0) {
             e.preventDefault();
-            // Use last selected path or all? Logic supports single file copy for now
             if (lastSelectedPath) {
               setClipboard({ path: lastSelectedPath, op: 'copy' });
             }
@@ -345,7 +504,7 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedPaths, renamingPath, deleteTarget, lastSelectedPath, clipboard]);
+  }, [selectedPaths, renamingPath, deleteTarget, lastSelectedPath, clipboard, fileTree, flattenTree]);
 
   // 파일 삭제 처리
   const handleDeleteConfirm = async () => {
@@ -900,12 +1059,55 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
     }
   };
 
+  // 루트 디렉토리에 드롭하는 핸들러
+  const handleRootDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTargetPath(null);
+
+    const sourcePath = dragSourcePath;
+    if (!sourcePath || !workspaceDir) return;
+
+    const fileName = sourcePath.split('/').pop();
+    const newPath = `${workspaceDir}/${fileName}`;
+
+    if (sourcePath === newPath) return; // 이미 루트에 있음
+
+    try {
+      const result = await window.electron.fs.rename(sourcePath, newPath);
+      if (result.success) {
+        await loadDirectory(workspaceDir);
+        setSelectedPaths(new Set([newPath]));
+        setLastSelectedPath(newPath);
+      } else {
+        alert(`이동 실패: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to move item to root:', error);
+    } finally {
+      setDragSourcePath(null);
+    }
+  };
+
+  const handleRootDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (dragSourcePath && workspaceDir) {
+      e.dataTransfer.dropEffect = 'move';
+      setDropTargetPath(workspaceDir);
+    }
+  };
+
+  const handleRootDragLeave = () => {
+    setDropTargetPath(null);
+  };
+
   // 파일 트리 렌더링
   const renderFileTree = (nodes: FileNode[], depth = 0) => {
     return nodes.map((node) => (
       <div key={node.path}>
         <div
           className={`file-item ${selectedPaths.has(node.path) ? 'selected' : ''} ${dropTargetPath === node.path ? 'drop-target' : ''}`}
+          data-filepath={node.path}
           style={{
             paddingLeft: `${depth * 12 + 8}px`,
             opacity: (dragSourcePath === node.path || (clipboard?.op === 'cut' && clipboard.path === node.path)) ? 0.5 : 1
@@ -922,7 +1124,7 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
           onContextMenu={(e) => handleContextMenu(e, node)}
         >
           <span className="file-icon">
-            {node.isDirectory ? ((node.isExpanded || dropTargetPath === node.path) ? <FolderOpenIcon size={16} /> : <FolderIcon size={16} />) : getIconForFile(node.name, 16)}
+            {node.isDirectory ? (getIconForFolder(node.name, !!(node.isExpanded || dropTargetPath === node.path), 16) || ((node.isExpanded || dropTargetPath === node.path) ? <FolderOpenIcon size={16} /> : <FolderIcon size={16} />)) : getIconForFile(node.name, 16)}
           </span>
           {renamingPath === node.path ? (
             <input
@@ -947,6 +1149,38 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
         </div>
         {node.isDirectory && node.isExpanded && node.children && (
           <div className="file-children">
+            {isCreating.type && isCreating.parentPath === node.path && (
+              <div
+                className="file-item"
+                style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
+              >
+                <span className="file-icon">
+                  {isCreating.type === 'folder' ? <FolderIcon size={16} /> : getIconForFile(newItemName || 'untitled', 16)}
+                </span>
+                <input
+                  type="text"
+                  className="file-rename-input"
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter' && newItemName.trim()) {
+                      await handleCreateItem();
+                    } else if (e.key === 'Escape') {
+                      setIsCreating({ type: null, parentPath: null });
+                      setNewItemName('');
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!newItemName.trim()) {
+                      setIsCreating({ type: null, parentPath: null });
+                      setNewItemName('');
+                    }
+                  }}
+                  placeholder={isCreating.type === 'file' ? '' : ''}
+                  autoFocus
+                />
+              </div>
+            )}
             {renderFileTree(node.children, depth + 1)}
           </div>
         )}
@@ -970,7 +1204,7 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
         ) : (
           <>
             <div className={`file-tree-header ${selectedPaths.size === 0 && !contextMenu ? 'root-selected' : ''}`}>
-              <div className="workspace-name" style={{ color: selectedPaths.size === 0 && !contextMenu ? 'var(--accent-blue)' : 'inherit' }}>
+              <div className="workspace-name">
                 {workspaceDir.split('/').pop()}
               </div>
               <div className="file-actions">
@@ -1033,28 +1267,8 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
               </div>
             </div>
 
-            {isCreating.type && (
-              <div className="new-item-input">
-                <input
-                  type="text"
-                  value={newItemName}
-                  onChange={(e) => setNewItemName(e.target.value)}
-                  onKeyDown={async (e) => {
-                    if (e.key === 'Enter' && newItemName.trim()) {
-                      await handleCreateItem();
-                    } else if (e.key === 'Escape') {
-                      setIsCreating({ type: null, parentPath: null });
-                      setNewItemName('');
-                    }
-                  }}
-                  placeholder={isCreating.type === 'file' ? '새 파일 이름...' : '새 폴더 이름...'}
-                  autoFocus
-                />
-              </div>
-            )}
-
             <div
-              className="file-tree"
+              className={`file-tree ${dropTargetPath === workspaceDir ? 'drop-target-root' : ''}`}
               onContextMenu={handleBackgroundContextMenu}
               onClick={(e) => {
                 // 배경 클릭 시 선택 해제 -> 결과적으로 Root 선택 효과
@@ -1062,8 +1276,43 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
                 setSelectedPaths(new Set());
                 setLastSelectedPath(null);
               }}
+              onDragOver={handleRootDragOver}
+              onDragLeave={handleRootDragLeave}
+              onDrop={handleRootDrop}
               style={{ minHeight: '100%' }} // Ensure full height for background click
             >
+              {isCreating.type && isCreating.parentPath === workspaceDir && (
+                <div
+                  className="file-item"
+                  style={{ paddingLeft: '8px' }}
+                >
+                  <span className="file-icon">
+                    {isCreating.type === 'folder' ? <FolderIcon size={16} /> : getIconForFile(newItemName || 'untitled', 16)}
+                  </span>
+                  <input
+                    type="text"
+                    className="file-rename-input"
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter' && newItemName.trim()) {
+                        await handleCreateItem();
+                      } else if (e.key === 'Escape') {
+                        setIsCreating({ type: null, parentPath: null });
+                        setNewItemName('');
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!newItemName.trim()) {
+                        setIsCreating({ type: null, parentPath: null });
+                        setNewItemName('');
+                      }
+                    }}
+                    placeholder={''}
+                    autoFocus
+                  />
+                </div>
+              )}
               {renderFileTree(fileTree)}
             </div>
           </>
@@ -1093,18 +1342,7 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
       {contextMenu && (
         <div
           className="context-menu"
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            zIndex: 9999,
-            backgroundColor: '#252526',
-            border: '1px solid #454545',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
-            borderRadius: '4px',
-            padding: '4px 0',
-            minWidth: '160px'
-          }}
+          style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
           {contextMenu.node && (
@@ -1114,9 +1352,8 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
                 setIsCreating({ type: 'file', parentPath });
                 setNewItemName('');
                 setContextMenu(null);
-                // Expand if directory
                 if (contextMenu.node!.isDirectory) toggleDirectory(contextMenu.node!.path, true);
-              }} style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+              }}>
                 New File
               </div>
               <div className="context-menu-item" onClick={() => {
@@ -1124,38 +1361,48 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
                 setIsCreating({ type: 'folder', parentPath });
                 setNewItemName('');
                 setContextMenu(null);
-                // Expand if directory
                 if (contextMenu.node!.isDirectory) toggleDirectory(contextMenu.node!.path, true);
-              }} style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+              }}>
                 New Folder
               </div>
-              <div style={{ height: '1px', backgroundColor: '#454545', margin: '4px 0' }}></div>
-              <div className="context-menu-item" onClick={handleCopy} style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+              <div className="context-menu-separator"></div>
+              <div className="context-menu-item" onClick={handleCopy}>
                 Copy
               </div>
-              <div className="context-menu-item" onClick={handleCut} style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+              <div className="context-menu-item" onClick={handleCut}>
                 Cut
               </div>
             </>
           )}
 
-          <div className="context-menu-item" onClick={handlePaste} style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: clipboard ? '#cccccc' : '#666', pointerEvents: clipboard ? 'auto' : 'none' }} onMouseEnter={(e) => clipboard && (e.currentTarget.style.backgroundColor = '#094771')} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+          <div className={`context-menu-item ${!clipboard ? 'disabled' : ''}`} onClick={handlePaste}>
             Paste
           </div>
 
           {contextMenu.node && (
             <>
-              <div style={{ height: '1px', backgroundColor: '#454545', margin: '4px 0' }}></div>
-              <div className="context-menu-item" onClick={handleRequestRename} style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+              <div className="context-menu-separator"></div>
+              <div className="context-menu-item" onClick={handleRequestRename}>
                 Rename (F2)
               </div>
-              <div className="context-menu-item" onClick={handleRequestDelete} style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+              <div className="context-menu-item" onClick={handleRequestDelete}>
                 Delete
               </div>
             </>
           )}
         </div>
       )}
+
+      {/* 덮어쓰기 확인 모달 */}
+      <ConfirmModal
+        isOpen={overwriteModal.isOpen}
+        title="파일 덮어쓰기"
+        message={`'${overwriteModal.sourceName}'이(가) 이미 존재합니다.\n덮어쓰시겠습니까?`}
+        confirmText="덮어쓰기"
+        variant="delete"
+        onConfirm={overwriteModal.onConfirm}
+        onCancel={() => setOverwriteModal({ isOpen: false, sourceName: '', onConfirm: () => { } })}
+      />
     </div>
   );
 }

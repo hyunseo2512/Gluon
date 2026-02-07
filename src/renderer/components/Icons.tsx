@@ -411,6 +411,11 @@ import {
   siGnubash,
   siJson,
   siMarkdown,
+  siDocker,
+  siC,
+  siCplusplus,
+  siMysql,
+  siReadme,
 } from 'simple-icons/icons';
 
 // Import Material Design Icons
@@ -439,6 +444,11 @@ import {
   MdCloudDownload,
   MdExtension,
 } from 'react-icons/md';
+
+import {
+  VscKey,
+  VscGear,
+} from 'react-icons/vsc';
 
 // --- Simple Icons Helper ---
 const SimpleIcon = ({ icon, size = 16, className = '', color }: IconProps & { icon: any, color?: string }) => (
@@ -480,31 +490,31 @@ export const FileIcon = ({ size = 16, className = '' }: IconProps) => (
   <MatIcon Icon={MdInsertDriveFile} size={size} className={className} />
 );
 
-// 폴더 닫힘 아이콘 (Modern)
+// 폴더 닫힘 아이콘 (Material Design Flat - Steel Blue)
 export const FolderIcon = ({ size = 16, className = '', color }: IconProps) => (
   <svg
     width={size}
     height={size}
     viewBox="0 0 24 24"
-    fill={color || "#3B82F6"}
+    fill="none"
     className={className}
-    style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.1))' }}
   >
-    <path d="M4 4C2.9 4 2.01 4.9 2.01 6L2 18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6H12L10 4H4Z" />
+    <path d="M4 4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6H12L10 4H4Z" fill={color || "#4682B4"} />
+    <path d="M4 6H10L12 8H20V18H4V6Z" fill={color || "#5A9FD4"} opacity="0.3" />
   </svg>
 );
 
-// 폴더 열림 아이콘 (Modern)
+// 폴더 열림 아이콘 (Material Design Flat - Steel Blue)
 export const FolderOpenIcon = ({ size = 16, className = '', color }: IconProps) => (
   <svg
     width={size}
     height={size}
     viewBox="0 0 24 24"
+    fill="none"
     className={className}
-    style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))' }}
   >
-    <path d="M4 4C2.9 4 2.01 4.9 2.01 6L2 18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6H12L10 4H4Z" fill={color || "#3B82F6"} opacity="0.4" />
-    <path d="M22 8.5L20 18H5L7 8.5H22Z" fill={color || "#60A5FA"} />
+    <path d="M4 4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6H12L10 4H4Z" fill={color || "#4682B4"} opacity="0.5" />
+    <path d="M2 10L4 18H20L22 10H2Z" fill={color || "#5A9FD4"} />
   </svg>
 );
 
@@ -583,9 +593,20 @@ export const TsxIcon = ({ size = 16, className = '' }: IconProps) => (
   <SimpleIcon icon={siReact} size={size} className={className} color="#3178C6" />
 );
 
-// Python 아이콘
+// Python 아이콘 (공식 로고 - 파란땹/노란녹)
 export const PyIcon = ({ size = 16, className = '' }: IconProps) => (
-  <SimpleIcon icon={siPython} size={size} className={className} />
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={className}
+  >
+    {/* 파란색 녉 (좌상단) */}
+    <path d="M11.914 0C5.82 0 6.2 2.656 6.2 2.656l.007 2.752h5.814v.826H3.9S0 5.789 0 11.969c0 6.18 3.403 5.96 3.403 5.96h2.03v-2.867s-.109-3.402 3.35-3.402h5.767s3.24.052 3.24-3.13V3.202S18.28 0 11.914 0zm-3.21 1.896a1.04 1.04 0 110 2.08 1.04 1.04 0 010-2.08z" fill="#3776AB" />
+    {/* 노란색 녉 (우하단) */}
+    <path d="M12.086 24c6.094 0 5.714-2.656 5.714-2.656l-.007-2.752h-5.814v-.826h8.121s3.9.445 3.9-5.735c0-6.18-3.403-5.96-3.403-5.96h-2.03v2.867s.109 3.402-3.35 3.402H9.45s-3.24-.052-3.24 3.13v5.328S5.72 24 12.086 24zm3.21-1.896a1.04 1.04 0 110-2.08 1.04 1.04 0 010 2.08z" fill="#FFD43B" />
+  </svg>
 );
 
 // Java Icon (Coffee Cup)
@@ -614,9 +635,22 @@ export const BashIcon = ({ size = 16, className = '' }: IconProps) => (
   <SimpleIcon icon={siGnubash} size={size} className={className} />
 );
 
-// JSON Icon (Neon Green)
+// JSON Icon ({} 중괄호 스타일, 노란색) - Lucide Braces
 export const JsonIcon = ({ size = 16, className = '' }: IconProps) => (
-  <SimpleIcon icon={siJson} size={size} className={className} color="#00E676" />
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="#FFD700"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" />
+    <path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" />
+  </svg>
 );
 
 // Markdown Icon
@@ -625,63 +659,23 @@ export const MdIcon = ({ size = 16, className = '' }: IconProps) => (
 );
 
 
-// C 아이콘
+// C 아이콘 (simple-icons 공식 로고)
 export const CIcon = ({ size = 16, className = '' }: IconProps) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="#5e97d0"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <circle cx="12" cy="12" r="10" />
-    <text x="8" y="16" fontSize="12" fontWeight="bold" fill="currentColor" stroke="none">C</text>
-  </svg>
+  <SimpleIcon icon={siC} size={size} className={className} />
 );
 
-// C++ 아이콘
+// C++ 아이콘 (simple-icons 공식 로고)
 export const CppIcon = ({ size = 16, className = '' }: IconProps) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="#5e97d0"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <circle cx="12" cy="12" r="10" />
-    <text x="3.5" y="15" fontSize="9" fontWeight="bold" fill="currentColor" stroke="none">C++</text>
-  </svg>
+  <SimpleIcon icon={siCplusplus} size={size} className={className} />
 );
 
 // 사용되지 않는 구형 MarkdownIcon 제거됨
 
 
 
-// Git/Gitignore 아이콘
+// Git/Gitignore 아이콘 (Git 로고 스타일)
 export const GitIgnoreIcon = ({ size = 16, className = '' }: IconProps) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="#f34f29"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <circle cx="12" cy="12" r="10" />
-    <circle cx="12" cy="12" r="4" />
-    <line x1="8" y1="8" x2="16" y2="16" />
-  </svg>
+  <SimpleIcon icon={siGit} size={size} className={className} color="#F05032" />
 );
 
 // Gradle 아이콘
@@ -689,7 +683,16 @@ export const GradleIcon = ({ size = 16, className = '' }: IconProps) => (
   <SimpleIcon icon={siGradle} size={size} className={className} color="#02303A" />
 );
 
-// XML 아이콘
+// Docker 아이콘
+export const DockerIcon = ({ size = 16, className = '' }: IconProps) => (
+  <SimpleIcon icon={siDocker} size={size} className={className} />
+);
+
+// SQL 아이콘 (Lucide - Database)
+import { Database } from 'lucide-react';
+export const SqlIcon = ({ size = 16, className = '' }: IconProps) => (
+  <Database size={size} className={className} color="#FF9800" />
+);
 export const XmlIcon = ({ size = 16, className = '' }: IconProps) => (
   <svg
     width={size}
@@ -811,10 +814,40 @@ export const WarningIcon = ({ size = 16, className = '' }: IconProps) => (
  * 파일명에 따라 적절한 아이콘 컴포넌트를 반환하는 헬퍼 함수
  */
 export const getIconForFile = (filename: string, size: number = 16) => {
-  const ext = filename.split('.').pop()?.toLowerCase();
+  const basename = filename.split('/').pop()?.split('\\').pop() || filename;
+  const ext = basename.split('.').pop()?.toLowerCase();
 
-  if (filename.toLowerCase().includes('gradle')) {
+  if (basename.toLowerCase().includes('gradle')) {
     return <GradleIcon size={size} />;
+  }
+
+  // .gluonrules 체크
+  if (basename.toLowerCase() === '.gluonrules') {
+    return <GluonRulesIcon size={size} />;
+  }
+
+  // README 체크
+  if (basename.toLowerCase().startsWith('readme')) {
+    return <ReadmeIcon size={size} />;
+  }
+
+  // .env 파일 체크
+  const lowerName = basename.toLowerCase();
+  if (lowerName === '.env' || lowerName.startsWith('.env.') || lowerName === '.env.example' || lowerName === '.env.local') {
+    return <EnvIcon size={size} />;
+  }
+
+  // config 파일 체크
+  if (lowerName.endsWith('.config') || lowerName.endsWith('.conf') || lowerName.endsWith('.cfg') || lowerName.endsWith('.ini') || lowerName === '.editorconfig') {
+    return <ConfigIcon size={size} />;
+  }
+
+  // Dockerfile 체크 (확장자 없이 이름으로 판단)
+  if (lowerName === 'dockerfile' || lowerName.startsWith('dockerfile.')) {
+    return <DockerIcon size={size} />;
+  }
+  if (lowerName === 'docker-compose.yml' || lowerName === 'docker-compose.yaml' || lowerName === 'compose.yml' || lowerName === 'compose.yaml') {
+    return <DockerIcon size={size} />;
   }
 
   switch (ext) {
@@ -837,9 +870,10 @@ export const getIconForFile = (filename: string, size: number = 16) => {
     case 'jsx':
       return <JsxIcon size={size} />;
     case 'py':
-    case 'pyc':
     case 'pyd':
       return <PyIcon size={size} />;
+    case 'pyc':
+      return <PycIcon size={size} />;
     case 'java':
     case 'jar':
     case 'class':
@@ -854,6 +888,11 @@ export const getIconForFile = (filename: string, size: number = 16) => {
       return <CppIcon size={size} />;
     case 'json':
       return <JsonIcon size={size} />;
+    case 'sql':
+    case 'sqlite':
+    case 'mysql':
+    case 'pgsql':
+      return <SqlIcon size={size} />;
     case 'xml':
     case 'yml':
     case 'yaml':
@@ -867,6 +906,8 @@ export const getIconForFile = (filename: string, size: number = 16) => {
     case 'bmp':
     case 'ico':
     case 'webp':
+    case 'tiff':
+    case 'tif':
       return <PngIcon size={size} />;
     case 'md':
     case 'markdown':
@@ -875,6 +916,18 @@ export const getIconForFile = (filename: string, size: number = 16) => {
     case 'text':
     case 'log':
       return <TxtIcon size={size} />;
+    case 'sh':
+    case 'bash':
+    case 'zsh':
+    case 'fish':
+      return <ShellIcon size={size} />;
+    case 'mp3':
+    case 'wav':
+    case 'flac':
+    case 'ogg':
+    case 'aac':
+    case 'wma':
+      return <AudioIcon size={size} />;
     case 'gitignore':
     case 'gitattributes':
     case 'gitmodules':
@@ -884,6 +937,148 @@ export const getIconForFile = (filename: string, size: number = 16) => {
       return <FileIcon size={size} />;
   }
 };
+
+// 쉘 파일 아이콘
+export const ShellIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <rect x="2" y="3" width="20" height="18" rx="3" fill="#2D2D2D" />
+    <path d="M6 9l3 3-3 3" stroke="#4EAA25" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M12 15h5" stroke="#4EAA25" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+// 오디오 파일 아이콘
+export const AudioIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <rect x="3" y="3" width="18" height="18" rx="3" fill="#4A148C" opacity="0.7" />
+    <circle cx="10" cy="16" r="2.5" stroke="#CE93D8" strokeWidth="1.5" fill="none" />
+    <path d="M12.5 16V7l5 2v4" stroke="#CE93D8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+// Python 캐시 파일 아이콘 (.pyc) — 흐린 Python
+export const PycIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M12 2C8.5 2 6 3.5 6 5.5V8h6v1H5c-2 0-3.5 1.5-3.5 3.5S3 16 5 16h1v-2.5C6 11.5 7.5 10 9.5 10H15c1.5 0 2.5-1 2.5-2.5V5.5C17.5 3.5 15 2 12 2z" fill="#546E7A" opacity="0.5" />
+    <path d="M12 22c3.5 0 6-1.5 6-3.5V16h-6v-1h7c2 0 3.5-1.5 3.5-3.5S21 8 19 8h-1v2.5c0 2-1.5 3.5-3.5 3.5H9c-1.5 0-2.5 1-2.5 2.5v2C6.5 20.5 9 22 12 22z" fill="#546E7A" opacity="0.5" />
+  </svg>
+);
+
+// __pycache__ 디렉토리 아이콘
+export const PycacheFolderIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M2 6C2 4.9 2.9 4 4 4h5l2 2h9c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6z" fill="#546E7A" opacity="0.4" />
+    <path d="M10 11l2 2-2 2" stroke="#FFD54F" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+    <path d="M14 15h2" stroke="#FFD54F" strokeWidth="1.5" strokeLinecap="round" opacity="0.7" />
+  </svg>
+);
+
+export const PycacheFolderOpenIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M2 6C2 4.9 2.9 4 4 4h5l2 2h9c1.1 0 2 .9 2 2v1H7.5c-1.2 0-2.3.8-2.7 2L2 18V6z" fill="#546E7A" opacity="0.4" />
+    <path d="M4.8 11h16.4c.9 0 1.5.8 1.2 1.6l-2.4 7c-.2.5-.7.9-1.2.9H6.8c-.5 0-1-.3-1.2-.9l-2.4-7c-.3-.8.3-1.6 1.2-1.6z" fill="#78909C" opacity="0.4" />
+    <path d="M10 14l2 2-2 2" stroke="#FFD54F" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+    <path d="M14 18h2" stroke="#FFD54F" strokeWidth="1.5" strokeLinecap="round" opacity="0.7" />
+  </svg>
+);
+
+// bin 디렉토리 아이콘 (기어/실행)
+export const BinFolderIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M2 6C2 4.9 2.9 4 4 4h5l2 2h9c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6z" fill="#5C6BC0" opacity="0.6" />
+    <circle cx="12" cy="13" r="3" stroke="#E8EAF6" strokeWidth="1.5" fill="none" opacity="0.8" />
+    <path d="M12 9.5v1M12 15.5v1M8.8 11l.9.5M14.3 14.5l.9.5M8.8 15l.9-.5M14.3 11.5l.9-.5" stroke="#E8EAF6" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
+  </svg>
+);
+
+export const BinFolderOpenIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M2 6C2 4.9 2.9 4 4 4h5l2 2h9c1.1 0 2 .9 2 2v1H7.5c-1.2 0-2.3.8-2.7 2L2 18V6z" fill="#5C6BC0" opacity="0.6" />
+    <path d="M4.8 11h16.4c.9 0 1.5.8 1.2 1.6l-2.4 7c-.2.5-.7.9-1.2.9H6.8c-.5 0-1-.3-1.2-.9l-2.4-7c-.3-.8.3-1.6 1.2-1.6z" fill="#7986CB" opacity="0.5" />
+    <circle cx="12" cy="15" r="2.5" stroke="#E8EAF6" strokeWidth="1.5" fill="none" opacity="0.7" />
+  </svg>
+);
+
+// src 디렉토리 아이콘 (코드 브래킷)
+export const SrcFolderIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M2 6C2 4.9 2.9 4 4 4h5l2 2h9c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6z" fill="#00897B" opacity="0.6" />
+    <path d="M10 11l-2.5 2.5L10 16" stroke="#B2DFDB" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+    <path d="M14 11l2.5 2.5L14 16" stroke="#B2DFDB" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+  </svg>
+);
+
+export const SrcFolderOpenIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M2 6C2 4.9 2.9 4 4 4h5l2 2h9c1.1 0 2 .9 2 2v1H7.5c-1.2 0-2.3.8-2.7 2L2 18V6z" fill="#00897B" opacity="0.6" />
+    <path d="M4.8 11h16.4c.9 0 1.5.8 1.2 1.6l-2.4 7c-.2.5-.7.9-1.2.9H6.8c-.5 0-1-.3-1.2-.9l-2.4-7c-.3-.8.3-1.6 1.2-1.6z" fill="#26A69A" opacity="0.5" />
+    <path d="M10 14l-2 2L10 18" stroke="#B2DFDB" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+    <path d="M14 14l2 2L14 18" stroke="#B2DFDB" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+  </svg>
+);
+
+// node_modules 디렉토리 아이콘
+export const NodeModulesFolderIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M2 6C2 4.9 2.9 4 4 4h5l2 2h9c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6z" fill="#689F38" opacity="0.5" />
+    <path d="M12 10v6M9.5 11.5L12 10l2.5 1.5M9.5 14.5L12 16l2.5-1.5" stroke="#C5E1A5" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+  </svg>
+);
+
+export const NodeModulesFolderOpenIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M2 6C2 4.9 2.9 4 4 4h5l2 2h9c1.1 0 2 .9 2 2v1H7.5c-1.2 0-2.3.8-2.7 2L2 18V6z" fill="#689F38" opacity="0.5" />
+    <path d="M4.8 11h16.4c.9 0 1.5.8 1.2 1.6l-2.4 7c-.2.5-.7.9-1.2.9H6.8c-.5 0-1-.3-1.2-.9l-2.4-7c-.3-.8.3-1.6 1.2-1.6z" fill="#8BC34A" opacity="0.4" />
+    <path d="M12 13v5M9.5 14.5L12 13l2.5 1.5" stroke="#C5E1A5" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+  </svg>
+);
+
+// 디렉토리 아이콘 매칭
+export const getIconForFolder = (folderName: string, isOpen: boolean, size: number = 16) => {
+  const name = folderName.toLowerCase();
+  switch (name) {
+    case '__pycache__':
+      return isOpen ? <PycacheFolderOpenIcon size={size} /> : <PycacheFolderIcon size={size} />;
+    case 'bin':
+      return isOpen ? <BinFolderOpenIcon size={size} /> : <BinFolderIcon size={size} />;
+    case 'src':
+    case 'source':
+    case 'sources':
+      return isOpen ? <SrcFolderOpenIcon size={size} /> : <SrcFolderIcon size={size} />;
+    case 'node_modules':
+      return isOpen ? <NodeModulesFolderOpenIcon size={size} /> : <NodeModulesFolderIcon size={size} />;
+    default:
+      return null;
+  }
+};
+
+// Gluon Rules 아이콘 (앱 로고 기반)
+
+// .env 파일 아이콘
+export const EnvIcon = ({ size = 16, className = '' }: IconProps) => (
+  <VscKey size={size} className={className} color="#8BC34A" />
+);
+
+// .config 파일 아이콘
+export const ConfigIcon = ({ size = 16, className = '' }: IconProps) => (
+  <VscGear size={size} className={className} color="#BB86FC" />
+);
+
+// README 아이콘
+export const ReadmeIcon = ({ size = 16, className = '' }: IconProps) => (
+  <SimpleIcon icon={siReadme} size={size} className={className} color="#018EF5" />
+);
+export const GluonRulesIcon = ({ size = 16, className = '' }: IconProps) => (
+  <img
+    src="icons/gluon-512.svg"
+    width={size}
+    height={size}
+    className={className}
+    alt="Gluon"
+    style={{ objectFit: 'contain' }}
+  />
+);
+
 // 채팅 아이콘 (Ask 모드)
 export const ChatBubbleIcon = ({ size = 16, className = '' }: IconProps) => (
   <svg

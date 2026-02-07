@@ -41,6 +41,11 @@ declare global {
             shell: {
                 openExternal: (url: string) => Promise<void>;
             };
+            settings: {
+                getPath: () => Promise<string>;
+                read: () => Promise<{ success: boolean; data?: object; error?: string }>;
+                write: (settings: object) => Promise<{ success: boolean; error?: string }>;
+            };
             terminal: any; // Type as needed
         };
     }

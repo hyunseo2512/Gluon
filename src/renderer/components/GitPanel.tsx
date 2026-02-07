@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import '../styles/GitPanel.css';
 import { GitIcon, RotateCcwIcon, PlusIcon, UploadIcon, DownloadIcon, ChevronDownIcon, GithubIcon, getIconForFile } from './Icons';
+import ConfirmModal from './ConfirmModal';
 
 interface GitPanelProps {
     workspaceDir?: string;
@@ -56,6 +57,15 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
     const [viewMode, setViewMode] = useState<'all' | 'current'>('all');
     const [isCompact, setIsCompact] = useState(false);
     const [isNotGitRepo, setIsNotGitRepo] = useState(false);
+
+    // Confirm Modal States
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        variant: 'primary' | 'delete';
+        onConfirm: () => void;
+    }>({ isOpen: false, title: '', message: '', variant: 'primary', onConfirm: () => { } });
 
     const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
         setNotification({ message, type });
@@ -114,23 +124,31 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
         refreshStatus();
     }, [workspaceDir, activeTab, viewMode]);
 
-    const handleBranchChange = async (branchName: string) => {
+    const handleBranchChange = (branchName: string) => {
         if (!workspaceDir || branchName === currentBranch) return;
-        if (!confirm(`브랜치를 '${branchName}'(으)로 변경하시겠습니까? 변경 사항이 있으면 실패할 수 있습니다.`)) return;
 
-        setIsLoading(true);
-        try {
-            const result = await window.electron.git.checkout(workspaceDir, branchName);
-            if (result.success) {
-                refreshStatus();
-            } else {
-                setError(result.error || 'Checkout failed');
+        setConfirmModal({
+            isOpen: true,
+            title: '브랜치 변경',
+            message: `브랜치를 '${branchName}'(으)로 변경하시겠습니까?\n변경 사항이 있으면 실패할 수 있습니다.`,
+            variant: 'primary',
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                setIsLoading(true);
+                try {
+                    const result = await window.electron.git.checkout(workspaceDir, branchName);
+                    if (result.success) {
+                        refreshStatus();
+                    } else {
+                        setError(result.error || 'Checkout failed');
+                    }
+                } catch (err: any) {
+                    setError(err.message);
+                } finally {
+                    setIsLoading(false);
+                }
             }
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setIsLoading(false);
-        }
+        });
     };
 
     const handleFileClick = async (filePath: string) => {
@@ -174,12 +192,26 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
             // 여기서는 Staged 파일만 커밋한다고 가정, 혹은 addAll 옵션 제공 필요
             // 만약 stagedFiles가 비어있으면 알림
             if (stagedFiles.length === 0) {
-                if (confirm('스테이지된 변경 사항이 없습니다. 모든 변경 사항을 스테이지하고 커밋하시겠습니까?')) {
-                    await window.electron.git.add(workspaceDir, ['.']);
-                } else {
-                    setIsLoading(false);
-                    return;
-                }
+                setConfirmModal({
+                    isOpen: true,
+                    title: '모든 변경 사항 스테이지',
+                    message: '스테이지된 변경 사항이 없습니다.\n모든 변경 사항을 스테이지하고 커밋하시겠습니까?',
+                    variant: 'primary',
+                    onConfirm: async () => {
+                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                        await window.electron.git.add(workspaceDir!, ['.']);
+                        // 다시 커밋 시도
+                        const result = await window.electron.git.commit(workspaceDir!, commitMessage);
+                        if (result.success) {
+                            setCommitMessage('');
+                            refreshStatus();
+                        } else {
+                            setError(result.error || 'Commit failed');
+                        }
+                        setIsLoading(false);
+                    }
+                });
+                return;
             }
 
             const result = await window.electron.git.commit(workspaceDir, commitMessage);
@@ -272,26 +304,43 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
         }
     };
 
-    const handleInitRepo = async () => {
-        if (!workspaceDir) return;
-        const confirmInit = confirm('현재 폴더에 Git 저장소를 초기화하시겠습니까?');
-        if (!confirmInit) return;
-
-        setIsLoading(true);
-        try {
-            const result = await window.electron.git.init(workspaceDir);
-            if (result.success) {
-                showNotification('Git repository initialized', 'success');
-                setIsNotGitRepo(false);
-                refreshStatus();
-            } else {
-                setError(result.error || 'Git initialization failed');
-            }
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setIsLoading(false);
+    const handleInitRepo = () => {
+        if (!workspaceDir) {
+            showNotification('폴더를 먼저 열어주세요', 'error');
+            return;
         }
+
+        console.log('Initializing git in:', workspaceDir);
+
+        setConfirmModal({
+            isOpen: true,
+            title: 'Git 저장소 초기화',
+            message: `"${workspaceDir}"에 Git 저장소를 초기화하시겠습니까?`,
+            variant: 'primary',
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                setIsLoading(true);
+                try {
+                    console.log('Calling git.init...');
+                    const result = await window.electron.git.init(workspaceDir);
+                    console.log('git.init result:', result);
+                    if (result.success) {
+                        showNotification('Git repository initialized', 'success');
+                        setIsNotGitRepo(false);
+                        refreshStatus();
+                    } else {
+                        setError(result.error || 'Git initialization failed');
+                        showNotification(result.error || 'Git initialization failed', 'error');
+                    }
+                } catch (err: any) {
+                    console.error('git.init error:', err);
+                    setError(err.message);
+                    showNotification(err.message, 'error');
+                } finally {
+                    setIsLoading(false);
+                }
+            }
+        });
     };
 
     // --- Graph Logic ---
@@ -449,46 +498,56 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
 
     if (isNotGitRepo) {
         return (
-            <div className="git-panel empty" style={{ justifyContent: 'center', gap: '20px' }}>
-                <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
-                    <GitIcon size={64} style={{ marginBottom: '16px', opacity: 0.5 }} />
-                    <h3 style={{ fontSize: '18px', marginBottom: '8px', color: 'var(--text-primary)' }}>Git 저장소가 아닙니다</h3>
-                    <p style={{ fontSize: '13px', maxWidth: '250px', margin: '0 auto 24px auto', lineHeight: '1.5' }}>
-                        현재 폴더는 Git으로 관리되고 있지 않습니다.<br />
-                        새로운 리포지토리를 초기화하여 버전 관리를 시작하세요.
-                    </p>
-                    <button
-                        onClick={handleInitRepo}
-                        disabled={isLoading}
-                        style={{
-                            padding: '8px 16px',
-                            backgroundColor: 'var(--accent-blue)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '13px',
-                            fontWeight: 500
-                        }}
-                    >
-                        {isLoading ? '초기화 중...' : 'Initialize Repository'}
-                    </button>
-                    <button
-                        onClick={refreshStatus}
-                        style={{
-                            display: 'block',
-                            margin: '12px auto 0',
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--accent-blue)',
-                            cursor: 'pointer',
-                            fontSize: '12px'
-                        }}
-                    >
-                        다시 시도
-                    </button>
+            <>
+                <div className="git-panel empty" style={{ justifyContent: 'center', gap: '20px' }}>
+                    <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        <GitIcon size={64} style={{ marginBottom: '16px', opacity: 0.5 }} />
+                        <h3 style={{ fontSize: '18px', marginBottom: '8px', color: 'var(--text-primary)' }}>Git 저장소가 아닙니다</h3>
+                        <p style={{ fontSize: '13px', maxWidth: '250px', margin: '0 auto 24px auto', lineHeight: '1.5' }}>
+                            현재 폴더는 Git으로 관리되고 있지 않습니다.<br />
+                            새로운 리포지토리를 초기화하여 버전 관리를 시작하세요.
+                        </p>
+                        <button
+                            onClick={handleInitRepo}
+                            disabled={isLoading}
+                            style={{
+                                padding: '8px 16px',
+                                backgroundColor: 'var(--accent-blue)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '13px',
+                                fontWeight: 500
+                            }}
+                        >
+                            {isLoading ? '초기화 중...' : 'Initialize Repository'}
+                        </button>
+                        <button
+                            onClick={refreshStatus}
+                            style={{
+                                display: 'block',
+                                margin: '12px auto 0',
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--accent-blue)',
+                                cursor: 'pointer',
+                                fontSize: '12px'
+                            }}
+                        >
+                            다시 시도
+                        </button>
+                    </div>
                 </div>
-            </div>
+                <ConfirmModal
+                    isOpen={confirmModal.isOpen}
+                    title={confirmModal.title}
+                    message={confirmModal.message}
+                    variant={confirmModal.variant}
+                    onConfirm={confirmModal.onConfirm}
+                    onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                />
+            </>
         );
     }
 
@@ -923,6 +982,16 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
                     </div>
                 )
             }
+
+            {/* Confirm Modal */}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                variant={confirmModal.variant}
+                onConfirm={confirmModal.onConfirm}
+                onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+            />
         </div >
     );
 }

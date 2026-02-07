@@ -227,8 +227,8 @@
 
 /* Terminal Context Menu */
 .terminal-context-menu {
-  background-color: #252526;
-  border: 1px solid #454545;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   border-radius: 4px;
   padding: 4px 0;
@@ -239,15 +239,14 @@
 .context-menu-item {
   padding: 6px 16px;
   font-size: 13px;
-  color: #cccccc;
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
 }
 
 .context-menu-item:hover {
-  background-color: #094771;
-  /* VSCode Selection Blue */
+  background-color: var(--accent-blue);
   color: white;
 }
 

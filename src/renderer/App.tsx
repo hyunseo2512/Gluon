@@ -6,7 +6,7 @@ import CodeEditor from './components/CodeEditor';
 import TerminalPanel from './components/TerminalPanel';
 import AIPanel from './components/AIPanel';
 import SettingsPanel from './components/SettingsPanel';
-import ExtensionsPanel from './components/ExtensionsPanel';
+
 import GitPanel from './components/GitPanel';
 import SearchPanel from './components/SearchPanel';
 import Resizer from './components/Resizer';
@@ -25,7 +25,7 @@ import {
   HomeIcon,
   UpdateIcon
 } from './components/Icons';
-import gluonLogo from './assets/Gluon.svg';
+import gluonLogo from '/icons/gluon-512.svg';
 import './styles/App.css';
 import SSHConnectionModal from './components/SSHConnectionModal';
 import WelcomeScreen from './components/WelcomeScreen';
@@ -175,7 +175,7 @@ import { EditorSettings, DEFAULT_EDITOR_SETTINGS } from './types/settings';
 import { GlobalTooltip } from './components/GlobalTooltip';
 
 function App() {
-  const [sidebarView, setSidebarView] = useState<'explorer' | 'search' | 'git' | 'extensions'>('explorer');
+  const [sidebarView, setSidebarView] = useState<'explorer' | 'search' | 'git'>('explorer');
   const [isAIPanelOpen, setIsAIPanelOpen] = useState(false);
 
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
@@ -183,11 +183,29 @@ function App() {
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [editorSettings, setEditorSettings] = useState<EditorSettings>(DEFAULT_EDITOR_SETTINGS);
 
-  // 설정 로드 함수
+  // 설정 로드 함수 - settings.json에서 읽어옴
   const loadEditorSettings = async () => {
-    const saved = await window.electron.store.get('editor_settings');
-    if (saved.success && saved.value) {
-      setEditorSettings({ ...DEFAULT_EDITOR_SETTINGS, ...saved.value });
+    try {
+      const result = await window.electron.settings.read();
+      if (result.success && result.data) {
+        const jsonSettings = result.data as Record<string, unknown>;
+        // JSON 키 형식 (editor.fontSize)을 EditorSettings 객체로 변환
+        const settings: Partial<EditorSettings> = {};
+        if (jsonSettings['editor.fontSize'] !== undefined) settings.fontSize = jsonSettings['editor.fontSize'] as number;
+        if (jsonSettings['editor.fontFamily'] !== undefined) settings.fontFamily = jsonSettings['editor.fontFamily'] as string;
+        if (jsonSettings['editor.fontLigatures'] !== undefined) settings.fontLigatures = jsonSettings['editor.fontLigatures'] as boolean;
+        if (jsonSettings['editor.tabSize'] !== undefined) settings.tabSize = jsonSettings['editor.tabSize'] as number;
+        if (jsonSettings['editor.insertSpaces'] !== undefined) settings.insertSpaces = jsonSettings['editor.insertSpaces'] as boolean;
+        if (jsonSettings['editor.wordWrap'] !== undefined) settings.wordWrap = jsonSettings['editor.wordWrap'] as boolean;
+        if (jsonSettings['editor.minimap'] !== undefined) settings.minimap = jsonSettings['editor.minimap'] as boolean;
+        if (jsonSettings['editor.lineNumbers'] !== undefined) settings.lineNumbers = jsonSettings['editor.lineNumbers'] as boolean;
+        if (jsonSettings['editor.formatOnSave'] !== undefined) settings.formatOnSave = jsonSettings['editor.formatOnSave'] as boolean;
+        if (jsonSettings['editor.theme'] !== undefined) settings.theme = jsonSettings['editor.theme'] as string;
+        if (jsonSettings['editor.defaultFormatter'] !== undefined) settings.defaultFormatter = jsonSettings['editor.defaultFormatter'] as string;
+        setEditorSettings({ ...DEFAULT_EDITOR_SETTINGS, ...settings });
+      }
+    } catch (error) {
+      console.error('Failed to load editor settings:', error);
     }
   };
 
@@ -212,6 +230,12 @@ function App() {
     setRefreshKey(prev => prev + 1);
   };
 
+  // Reveal file in explorer
+  const [revealFilePath, setRevealFilePath] = useState<string | null>(null);
+
+  // Ctrl+L 4단계 사이클 추적: 열기 → 포커스 → 블러 → 닫기
+  const aiPromptVisited = useRef(false);
+
   // Unsaved Modal State
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [unsavedFilesForModal, setUnsavedFilesForModal] = useState<OpenFile[]>([]);
@@ -219,6 +243,9 @@ function App() {
 
   // Diagnostics (Errors/Warnings)
   const [diagnostics, setDiagnostics] = useState<{ errors: number; warnings: number; markers: any[] }>({ errors: 0, warnings: 0, markers: [] });
+
+  // Current Git Branch
+  const [currentBranch, setCurrentBranch] = useState<string>('');
 
   // Clone Modal State
   const [showCloneModal, setShowCloneModal] = useState(false);
@@ -314,6 +341,7 @@ function App() {
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [forceShowWelcome, setForceShowWelcome] = useState(false);
+  const [showCloseProjectModal, setShowCloseProjectModal] = useState(false);
 
   // 줌 메뉴 상태
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
@@ -775,21 +803,130 @@ function App() {
       const binding = shortcuts.find(s => s.currentKey === combo);
       if (!binding) return;
 
-      // 단축키 매칭되면 기본 동작 방지
-      e.preventDefault();
+      // 앱 레벨에서 직접 처리하는 명령만 Monaco 이벤트 차단
+      const appLevelCommands = new Set([
+        'toggleSidebar', 'toggleTerminal', 'toggleAIPanel',
+        'saveFile', 'saveAllFiles', 'zoomIn', 'zoomOut', 'zoomReset', 'revealInExplorer',
+        'prevTab', 'nextTab', 'terminalPrevTab', 'terminalNextTab', 'closeTab',
+        'newFile', 'openFile', 'openFolder', 'markdownPreview'
+      ]);
+
+      if (appLevelCommands.has(binding.command)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      // 나머지 (find, replace, commentLine 등)는 Monaco가 자체 처리
 
       switch (binding.command) {
         case 'toggleSidebar':
           setIsSidePanelOpen(prev => !prev);
           break;
         case 'toggleTerminal':
-          setIsTerminalOpen(prev => !prev);
+          setIsTerminalOpen(prev => {
+            if (!prev) {
+              // 열기 → 터미널 포커스
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('terminal-focus'));
+              }, 100);
+            } else {
+              // 닫기 → 에디터 포커스
+              setTimeout(() => {
+                const editor = document.querySelector('.monaco-editor textarea') as HTMLElement;
+                if (editor) editor.focus();
+              }, 50);
+            }
+            return !prev;
+          });
           break;
-        case 'toggleAIPanel':
-          setIsAIPanelOpen(prev => !prev);
+        case 'toggleAIPanel': {
+          const promptEl = document.querySelector('.ai-input-field') as HTMLTextAreaElement | null;
+          const isPromptFocused = promptEl && document.activeElement === promptEl;
+
+          if (!isAIPanelOpen) {
+            // 1단계: 패널 닫힘 → 열기
+            setIsAIPanelOpen(true);
+            aiPromptVisited.current = false;
+          } else if (isAIPanelOpen && !isPromptFocused && !aiPromptVisited.current) {
+            // 2단계: 패널 열림 + 프롬프트 미방문 → 포커스
+            if (promptEl) {
+              promptEl.focus();
+              aiPromptVisited.current = true;
+            } else {
+              setIsAIPanelOpen(false);
+              aiPromptVisited.current = false;
+            }
+          } else if (isAIPanelOpen && isPromptFocused) {
+            // 3단계: 프롬프트 포커스 → 블러
+            promptEl.blur();
+          } else if (isAIPanelOpen && !isPromptFocused && aiPromptVisited.current) {
+            // 4단계: 프롬프트 방문 후 블러 상태 → 닫기
+            setIsAIPanelOpen(false);
+            aiPromptVisited.current = false;
+          }
           break;
+        }
         case 'saveFile':
           handleFileSave();
+          break;
+        case 'saveAllFiles': {
+          (async () => {
+            for (let i = 0; i < openFiles.length; i++) {
+              if (openFiles[i].isDirty) {
+                await handleFileSave(i);
+              }
+            }
+          })();
+          break;
+        }
+        case 'newFile': {
+          // Untitled 파일 번호 계산
+          const untitledNums = openFiles
+            .map(f => f.path.match(/^Untitled-(\d+)$/)?.[1])
+            .filter(Boolean)
+            .map(Number);
+          const nextNum = untitledNums.length > 0 ? Math.max(...untitledNums) + 1 : 1;
+          const untitledFile: OpenFile = {
+            path: `Untitled-${nextNum}`,
+            content: '',
+            isDirty: false
+          };
+          setOpenFiles([...openFiles, untitledFile]);
+          setActiveFileIndex(openFiles.length);
+          break;
+        }
+        case 'openFile': {
+          (async () => {
+            try {
+              const dialogResult = await window.electron.dialog.openFile();
+              if (!dialogResult.success || !dialogResult.path) return;
+              const filePath = dialogResult.path;
+              // 이미 열려있으면 활성화
+              const existingIdx = openFiles.findIndex(f => f.path === filePath);
+              if (existingIdx !== -1) {
+                setActiveFileIndex(existingIdx);
+                return;
+              }
+              const readResult = await window.electron.fs.readFile(filePath);
+              if (readResult.success && readResult.content !== undefined) {
+                const newFile: OpenFile = {
+                  path: filePath,
+                  content: readResult.content,
+                  isDirty: false
+                };
+                setOpenFiles(prev => [...prev, newFile]);
+                setActiveFileIndex(openFiles.length);
+              }
+            } catch (err) {
+              console.error('Open file failed:', err);
+            }
+          })();
+          break;
+        }
+        case 'openFolder':
+          handleOpenFolder();
+          break;
+        case 'markdownPreview':
+          window.dispatchEvent(new CustomEvent('markdown-preview-toggle'));
           break;
         case 'zoomIn':
           applyZoom(zoomLevel + ZOOM_STEP);
@@ -800,12 +937,77 @@ function App() {
         case 'zoomReset':
           applyZoom(BASE_ZOOM);
           break;
+        case 'revealInExplorer': {
+          // 에디터 포커스 해제
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+          setIsSidePanelOpen(true);
+          setSidebarView('explorer');
+          if (activeFileIndex >= 0 && openFiles[activeFileIndex]) {
+            setRevealFilePath(openFiles[activeFileIndex].path);
+          }
+          break;
+        }
+        case 'prevTab':
+          if (openFiles.length > 1) {
+            setActiveFileIndex(prev => prev > 0 ? prev - 1 : openFiles.length - 1);
+          }
+          break;
+        case 'nextTab':
+          if (openFiles.length > 1) {
+            setActiveFileIndex(prev => prev < openFiles.length - 1 ? prev + 1 : 0);
+          }
+          break;
+        case 'terminalPrevTab':
+          window.dispatchEvent(new CustomEvent('terminal-switch-tab', { detail: { direction: 'prev' } }));
+          break;
+        case 'terminalNextTab':
+          window.dispatchEvent(new CustomEvent('terminal-switch-tab', { detail: { direction: 'next' } }));
+          break;
+        case 'closeTab':
+          if (activeFileIndex >= 0 && openFiles[activeFileIndex]) {
+            const file = openFiles[activeFileIndex];
+            if (!file.isDirty) {
+              const newFiles = openFiles.filter((_, i) => i !== activeFileIndex);
+              setOpenFiles(newFiles);
+              setActiveFileIndex(newFiles.length > 0 ? Math.min(activeFileIndex, newFiles.length - 1) : -1);
+            } else {
+              handleCloseTab(activeFileIndex);
+            }
+          }
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [shortcuts, handleFileSave, zoomLevel]);
+  }, [shortcuts, handleFileSave, zoomLevel, activeFileIndex, openFiles, isAIPanelOpen]);
+
+  // Ctrl+W 탭 닫기 (main process에서 커스텀 이벤트로 전달)
+  useEffect(() => {
+    const handleCloseActiveTab = () => {
+      // 터미널에 포커스가 있으면 터미널 탭 닫기
+      const terminalContainer = document.querySelector('.terminal-container');
+      if (terminalContainer && terminalContainer.contains(document.activeElement)) {
+        window.dispatchEvent(new CustomEvent('terminal-close-tab'));
+        return;
+      }
+      // 에디터 탭 닫기
+      if (activeFileIndex >= 0 && openFiles[activeFileIndex]) {
+        const file = openFiles[activeFileIndex];
+        if (!file.isDirty) {
+          const newFiles = openFiles.filter((_, i) => i !== activeFileIndex);
+          setOpenFiles(newFiles);
+          setActiveFileIndex(newFiles.length > 0 ? Math.min(activeFileIndex, newFiles.length - 1) : -1);
+        } else {
+          handleCloseTab(activeFileIndex);
+        }
+      }
+    };
+    window.addEventListener('close-active-tab', handleCloseActiveTab);
+    return () => window.removeEventListener('close-active-tab', handleCloseActiveTab);
+  }, [activeFileIndex, openFiles]);
 
   // 터미널 최대화 토글
   const handleToggleTerminalMaximize = () => {
@@ -872,6 +1074,27 @@ function App() {
       await window.electron.store.set('recents', newRecents);
     }
   };
+
+  // 현재 Git 브랜치 가져오기
+  useEffect(() => {
+    const fetchBranch = async () => {
+      if (!workspaceDir) {
+        setCurrentBranch('');
+        return;
+      }
+      try {
+        const result = await window.electron.git.status(workspaceDir);
+        if (result.success && result.status?.current) {
+          setCurrentBranch(result.status.current);
+        } else {
+          setCurrentBranch('');
+        }
+      } catch {
+        setCurrentBranch('');
+      }
+    };
+    fetchBranch();
+  }, [workspaceDir]);
 
   // ... (shortcuts useEffect 등 다른 코드 유지)
 
@@ -947,11 +1170,22 @@ function App() {
     try {
       const result = await window.electron.ssh.connect(config);
       if (result.success) {
+        // SFTP 세션 자동 시작
+        const sftpResult = await window.electron.sftp.start();
+        if (sftpResult.success) {
+          console.log('SFTP session started');
+          // 원격 홈 디렉토리 파일 목록 로드
+          const listResult = await window.electron.sftp.list(`/home/${config.username}`);
+          if (listResult.success) {
+            console.log('Remote files loaded:', listResult.files?.length);
+            // TODO: 파일 탐색기에 원격 파일 표시
+          }
+        }
         setIsSSHModalOpen(false);
         if (!isTerminalOpen) {
           setIsTerminalOpen(true);
         }
-        alert(`Connected to ${config.host} via SSH!`);
+        alert(`Connected to ${config.host} via SSH + SFTP!`);
       } else {
         alert(`SSH Connection Failed: ${result.error}`);
       }
@@ -968,16 +1202,20 @@ function App() {
     // 저장되지 않은 파일이 있으면 확인
     if (openFiles.some(f => f.isDirty)) {
       if (!await checkUnsavedChanges(openFiles)) return;
+      doCloseProject();
     } else {
-      // 저장할 게 없으면 단순 확인
-      if (!confirm('프로젝트를 닫으시겠습니까?')) return;
+      // 저장할 게 없으면 모달로 확인
+      setShowCloseProjectModal(true);
     }
+  };
 
+  // 실제 프로젝트 닫기 실행
+  const doCloseProject = () => {
     setWorkspaceDir(null);
     setOpenFiles([]);
     setActiveFileIndex(-1);
-    setSidebarView('explorer'); // 탐색기 뷰로 리셋
-    setSidebarView('explorer'); // 탐색기 뷰로 리셋
+    setSidebarView('explorer');
+    setShowCloseProjectModal(false);
   };
 
   // Run Project Logic
@@ -1339,56 +1577,69 @@ function App() {
       </header >
 
       {/* Clone Modal */}
-      {
-        showCloneModal && (
+      {showCloneModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          backdropFilter: 'blur(4px)'
+        }}>
           <div style={{
-            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-            backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999,
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
+            background: 'linear-gradient(135deg, #0f1520 0%, #141a28 100%)',
+            padding: '24px', borderRadius: '12px',
+            width: '420px', border: '1px solid rgba(88, 166, 255, 0.12)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(88, 166, 255, 0.05)'
           }}>
-            <div style={{
-              backgroundColor: '#252526', padding: '20px', borderRadius: '8px',
-              width: '400px', border: '1px solid #3c3c3c', boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-            }}>
-              <h3 style={{ marginTop: 0, color: '#cccccc' }}>Clone Repository</h3>
-              <input
-                type="text"
-                placeholder="Repository URL"
-                value={cloneUrl}
-                onChange={(e) => setCloneUrl(e.target.value)}
+            <h3 style={{
+              marginTop: 0, marginBottom: '16px', color: '#e0e8f0',
+              fontSize: '15px', fontWeight: 700, letterSpacing: '0.3px'
+            }}>Clone Repository</h3>
+            <input
+              type="text"
+              placeholder="https://github.com/user/repo.git"
+              value={cloneUrl}
+              onChange={(e) => setCloneUrl(e.target.value)}
+              style={{
+                width: '100%', padding: '10px 12px', marginBottom: '18px',
+                background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(88, 166, 255, 0.15)',
+                color: '#e0e8f0', borderRadius: '8px', fontSize: '13px',
+                outline: 'none', boxSizing: 'border-box',
+                transition: 'border-color 0.2s'
+              }}
+              onFocus={(e) => e.target.style.borderColor = 'rgba(88, 166, 255, 0.4)'}
+              onBlur={(e) => e.target.style.borderColor = 'rgba(88, 166, 255, 0.15)'}
+              autoFocus
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={() => setShowCloneModal(false)}
+                disabled={isCloning}
                 style={{
-                  width: '100%', padding: '8px', marginBottom: '16px',
-                  backgroundColor: '#3c3c3c', border: '1px solid #555', color: '#fff',
-                  borderRadius: '4px'
+                  padding: '8px 16px', background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.1)', color: '#a0a8b8',
+                  borderRadius: '8px', cursor: 'pointer', fontSize: '13px',
+                  transition: 'all 0.2s'
                 }}
-                autoFocus
-              />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button
-                  onClick={() => setShowCloneModal(false)}
-                  disabled={isCloning}
-                  style={{
-                    padding: '6px 12px', background: 'none', border: '1px solid #555',
-                    color: '#cccccc', borderRadius: '4px', cursor: 'pointer'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={executeClone}
-                  disabled={isCloning}
-                  style={{
-                    padding: '6px 12px', backgroundColor: '#007acc', border: 'none',
-                    color: 'white', borderRadius: '4px', cursor: 'pointer',
-                    opacity: isCloning ? 0.7 : 1
-                  }}
-                >
-                  {isCloning ? 'Cloning...' : 'Clone'}
-                </button>
-              </div>
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeClone}
+                disabled={isCloning}
+                style={{
+                  padding: '8px 16px', background: 'linear-gradient(135deg, #1a6dd4, #2b88e0)',
+                  border: 'none', color: '#ffffff', borderRadius: '8px',
+                  cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                  opacity: isCloning ? 0.7 : 1, transition: 'all 0.2s',
+                  boxShadow: '0 2px 8px rgba(26, 109, 212, 0.3)'
+                }}
+              >
+                {isCloning ? 'Cloning...' : 'Clone'}
+              </button>
             </div>
           </div>
-        )
+        </div>
+      )
       }
 
       {/* 메인 컨텐츠 영역 */}
@@ -1421,11 +1672,12 @@ function App() {
                 onCloseProject={handleCloseProject}
                 refreshKey={refreshKey}
                 onFileDelete={handleFileDelete}
+                revealFilePath={revealFilePath}
+                onRevealComplete={() => setRevealFilePath(null)}
               />
             ) : (
               <div className="panel-placeholder">
                 <p>오픈된 폴더가 없습니다.</p>
-                <button onClick={handleOpenFolder}>Folder</button>
               </div>
             )
           )}
@@ -1451,9 +1703,7 @@ function App() {
               </div>
             )
           )}
-          {sidebarView === 'extensions' && (
-            <ExtensionsPanel />
-          )}
+
         </div>
 
         {/* 리사이저 - 항상 표시 */}
@@ -1518,50 +1768,49 @@ function App() {
                 settings={editorSettings}
                 onReorderTabs={handleReorderTabs}
                 onDiagnosticsChange={(errors, warnings, markers) => setDiagnostics({ errors, warnings, markers })}
+                workspaceDir={workspaceDir || undefined}
               />
             )}
           </div>
 
-          {/* 하단 터미널 - 글로벌 영역 (Ctrl+J로 토글) */}
-          {isTerminalOpen && (
-            <>
-              <Resizer
-                direction="vertical"
-                onResize={(delta) => {
-                  setTerminalHeight((prev) => {
-                    const newHeight = prev - delta;
-                    // 80px 미만이면 터미널 닫기 (토글)
-                    if (newHeight < 80) {
-                      setTimeout(() => {
-                        setIsTerminalOpen(false);
-                        setTerminalHeight(250); // 다음에 열 때 기본 크기로 복원
-                      }, 0);
-                      return 250;
-                    }
-                    // 최소 100px 유지
-                    return Math.max(100, newHeight);
-                  });
-                }}
+          {/* 하단 터미널 - 글로벌 영역 (Ctrl+J로 토글) - display:none으로 숨기기 (세션 유지) */}
+          <div style={{ display: isTerminalOpen ? 'contents' : 'none' }}>
+            <Resizer
+              direction="vertical"
+              onResize={(delta) => {
+                setTerminalHeight((prev) => {
+                  const newHeight = prev - delta;
+                  // 80px 미만이면 터미널 닫기 (토글)
+                  if (newHeight < 80) {
+                    setTimeout(() => {
+                      setIsTerminalOpen(false);
+                      setTerminalHeight(250); // 다음에 열 때 기본 크기로 복원
+                    }, 0);
+                    return 250;
+                  }
+                  // 최소 100px 유지
+                  return Math.max(100, newHeight);
+                });
+              }}
+            />
+            <div
+              className="terminal-container"
+              style={{
+                height: terminalHeight > window.innerHeight * 0.8 ? '100%' : `${terminalHeight}px`,
+                flex: terminalHeight > window.innerHeight * 0.8 ? 1 : 'none',
+                flexShrink: 0,
+                minHeight: '100px'
+              }}
+            >
+              <TerminalPanel
+                onClose={() => setIsTerminalOpen(false)}
+                onMaximize={handleToggleTerminalMaximize}
+                isMaximized={terminalHeight > window.innerHeight * 0.8}
+                cwd={workspaceDir || undefined}
+                diagnostics={diagnostics}
               />
-              <div
-                className="terminal-container"
-                style={{
-                  height: terminalHeight > window.innerHeight * 0.8 ? '100%' : `${terminalHeight}px`,
-                  flex: terminalHeight > window.innerHeight * 0.8 ? 1 : 'none',
-                  flexShrink: 0,
-                  minHeight: '100px'
-                }}
-              >
-                <TerminalPanel
-                  onClose={() => setIsTerminalOpen(false)}
-                  onMaximize={handleToggleTerminalMaximize}
-                  isMaximized={terminalHeight > window.innerHeight * 0.8}
-                  cwd={workspaceDir || undefined}
-                  diagnostics={diagnostics}
-                />
-              </div>
-            </>
-          )}
+            </div>
+          </div>
 
         </div>
 
@@ -1614,10 +1863,12 @@ function App() {
 
 
 
-          <div className="status-item clickable">
-            <GitIcon size={12} />
-            <span>main</span>
-          </div>
+          {currentBranch && (
+            <div className="status-item clickable">
+              <GitIcon size={12} />
+              <span>{currentBranch}</span>
+            </div>
+          )}
 
           <div
             className="status-item clickable"
@@ -1719,21 +1970,39 @@ function App() {
             </>
           )}
 
-          <div className="status-item clickable" data-tooltip="Formatter" data-tooltip-pos="top">
-            <span style={{ marginRight: '4px', fontWeight: 'bold' }}>{'{ }'}</span>
-            <span className="status-value">Prettier</span>
-          </div>
+
         </div>
       </footer>
 
       {
         settingsOpen && (
           <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
-            <SettingsPanel onClose={() => {
-              setSettingsOpen(false);
-              loadShortcuts();
-              loadEditorSettings();
-            }} />
+            <SettingsPanel
+              onClose={() => {
+                setSettingsOpen(false);
+                loadShortcuts();
+                loadEditorSettings();
+              }}
+              onOpenSettingsJson={async (filePath: string) => {
+                // Read the settings.json file content
+                const result = await window.electron.fs.readFile(filePath);
+                if (result.success && result.content) {
+                  // Add the file to openFiles
+                  setOpenFiles((prev) => {
+                    // Check if file is already open
+                    const existingIndex = prev.findIndex((f) => f.path === filePath);
+                    if (existingIndex >= 0) {
+                      setActiveFileIndex(existingIndex);
+                      return prev;
+                    }
+                    // Add new file
+                    const newFiles: OpenFile[] = [...prev, { path: filePath, content: result.content as string, isDirty: false }];
+                    setActiveFileIndex(newFiles.length - 1);
+                    return newFiles;
+                  });
+                }
+              }}
+            />
           </div>
         )
       }
@@ -1757,6 +2026,20 @@ function App() {
           />
         )
       }
+
+      {/* 프로젝트 닫기 확인 모달 */}
+      {showCloseProjectModal && (
+        <div className="modal-overlay" onClick={() => setShowCloseProjectModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3>프로젝트 닫기</h3>
+            <p>프로젝트를 닫으시겠습니까?</p>
+            <div className="modal-actions" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button className="modal-btn cancel" onClick={() => setShowCloseProjectModal(false)}>취소</button>
+              <button className="modal-btn primary" onClick={doCloseProject}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div >
   );
 }

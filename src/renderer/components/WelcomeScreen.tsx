@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import '../styles/WelcomeScreen.css';
 import { FolderPlusIcon, GitIcon, ActivityIcon, UserIcon, XIcon } from './Icons';
 
@@ -21,8 +21,65 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     onOpenRecent,
     onRemoveRecent
 }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [focusIndex, setFocusIndex] = React.useState(0);
+
+    // 포커스 가능한 항목 수: 카드 3개 + recent 프로젝트
+    const totalItems = 3 + Math.min(recents.length, 3);
+
+    // 항목에 포커스 맞추기
+    const focusItem = useCallback((index: number) => {
+        if (!containerRef.current) return;
+        const items = containerRef.current.querySelectorAll<HTMLElement>('[data-welcome-item]');
+        if (items[index]) {
+            items[index].focus();
+            setFocusIndex(index);
+        }
+    }, []);
+
+    // 키보드 핸들러
+    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+        switch (e.key) {
+            case 'ArrowDown':
+            case 'ArrowRight':
+                e.preventDefault();
+                focusItem(focusIndex < totalItems - 1 ? focusIndex + 1 : 0);
+                break;
+            case 'ArrowUp':
+            case 'ArrowLeft':
+                e.preventDefault();
+                focusItem(focusIndex > 0 ? focusIndex - 1 : totalItems - 1);
+                break;
+            case 'Home':
+                e.preventDefault();
+                focusItem(0);
+                break;
+            case 'End':
+                e.preventDefault();
+                focusItem(totalItems - 1);
+                break;
+        }
+    }, [focusIndex, totalItems, focusItem]);
+
+    // Esc 키 → 첫 항목 포커스
+    useEffect(() => {
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                // 이미 포커스된 상태면 해제, 아니면 첫 항목 포커스
+                const active = document.activeElement as HTMLElement;
+                if (active?.hasAttribute('data-welcome-item')) {
+                    active.blur();
+                } else {
+                    focusItem(0);
+                }
+            }
+        };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [focusItem]);
+
     return (
-        <div className="welcome-screen">
+        <div className="welcome-screen" ref={containerRef} onKeyDown={handleKeyDown}>
             <div className="welcome-content">
                 <div className="welcome-logo">
                     <h1>Gluon</h1>
@@ -31,7 +88,12 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
                 <div className="welcome-actions">
 
-                    <button className="welcome-action-card" onClick={onOpenProject}>
+                    <button
+                        className="welcome-action-card"
+                        onClick={onOpenProject}
+                        data-welcome-item="0"
+                        onFocus={() => setFocusIndex(0)}
+                    >
                         <div className="action-icon">
                             <FolderPlusIcon size={24} />
                         </div>
@@ -41,7 +103,12 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                         </div>
                     </button>
 
-                    <button className="welcome-action-card" onClick={onCloneRepo}>
+                    <button
+                        className="welcome-action-card"
+                        onClick={onCloneRepo}
+                        data-welcome-item="1"
+                        onFocus={() => setFocusIndex(1)}
+                    >
                         <div className="action-icon">
                             <GitIcon size={24} />
                         </div>
@@ -51,7 +118,12 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                         </div>
                     </button>
 
-                    <button className="welcome-action-card" onClick={onConnectSSH}>
+                    <button
+                        className="welcome-action-card"
+                        onClick={onConnectSSH}
+                        data-welcome-item="2"
+                        onFocus={() => setFocusIndex(2)}
+                    >
                         <div className="action-icon">
                             <ActivityIcon size={24} />
                         </div>
@@ -73,7 +145,17 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                                     key={index}
                                     className="recent-item"
                                     onClick={() => onOpenRecent && onOpenRecent(path)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            onOpenRecent && onOpenRecent(path);
+                                        }
+                                    }}
                                     title={path}
+                                    tabIndex={0}
+                                    data-welcome-item={3 + index}
+                                    onFocus={() => setFocusIndex(3 + index)}
+                                    role="button"
                                 >
                                     <span className="recent-name">{path.split('/').pop()}</span>
                                     <button
@@ -82,6 +164,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                                             e.stopPropagation();
                                             onRemoveRecent && onRemoveRecent(path);
                                         }}
+                                        tabIndex={-1}
                                         title="Remove from history"
                                     >
                                         <XIcon size={14} />

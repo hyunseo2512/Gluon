@@ -66,7 +66,7 @@ function ChatPanel() {
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'system',
-        content: `❌ 오류: ${error.message}`,
+        content: `오류: ${error.message}`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -149,7 +149,7 @@ function ChatPanel() {
           rows={3}
         />
         <button className="send-button" onClick={handleSend} disabled={isLoading || !input.trim()}>
-          {isLoading ? '⏳' : '📤'} 전송
+          {isLoading ? '...' : 'Send'} 전송
         </button>
       </div>
     </div>

@@ -23,8 +23,15 @@ interface MarkdownRendererProps {
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, onRunCode, onApprove }) => {
     if (!content) return null;
 
+    // DeepSeek R1의 <think>...</think> 태그 제거 (뇌 이모지 포함)
+    let cleanedContent = content
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')  // <think>...</think> 태그 제거
+        .replace(/🧠\s*\(deepseek[^)]*\)/gi, '')    // 🧠 (deepseek...) 패턴 제거
+        .replace(/\(deepseek[^)]*\)/gi, '')         // (deepseek...) 패턴 제거
+        .trim();
+
     // Split by code blocks first to avoid parsing markdown inside code blocks
-    const parts = content.split(/(```[\s\S]*?```)/g);
+    const parts = cleanedContent.split(/(```[\s\S]*?```)/g);
 
     return (
         <div className="markdown-content">
@@ -126,7 +133,7 @@ const FormattedText: React.FC<{ text: string, onApprove?: (tool: string) => void
                 const toolName = match[1];
                 return (
                     <div key={i} className="approval-container" style={{ margin: '8px 0', padding: '10px', backgroundColor: 'rgba(64, 224, 208, 0.1)', border: '1px solid rgba(64, 224, 208, 0.3)', borderRadius: '6px' }}>
-                        <div style={{ marginBottom: '8px', fontSize: '13px', color: '#40e0d0' }}>⚠️ Approval Required</div>
+                        <div style={{ marginBottom: '8px', fontSize: '13px', color: '#40e0d0' }}>Approval Required</div>
                         <div>
                             <button
                                 className="approve-button"

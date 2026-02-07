@@ -34,6 +34,7 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
   const [sessionId, setSessionId] = useState<string>(() => Date.now().toString());
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
 
   // AI 모드 상태 (Ask, Agent)
   const [aiMode, setAiMode] = useState<'Ask' | 'Agent'>('Ask');
@@ -44,6 +45,23 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // 로딩 경과 시간 (초)
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
+
+  // 로딩 경과 시간 타이머
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (isLoading) {
+      setLoadingSeconds(0);
+      timer = setInterval(() => {
+        setLoadingSeconds(prev => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isLoading]);
 
   // Initialize Chat & Migrate
   useEffect(() => {
@@ -154,27 +172,32 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
     setShowHistory(!showHistory);
   };
 
-  // Delete session
-  const handleDeleteSession = async (e: React.MouseEvent, sid: string) => {
+  // Delete session - 모달 트리거
+  const handleDeleteSession = (e: React.MouseEvent, sid: string) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this conversation?')) return;
+    setDeleteSessionId(sid);
+  };
 
+  // 실제 삭제 실행
+  const doDeleteSession = async () => {
+    if (!deleteSessionId) return;
     try {
       const homeDir = await window.electron.app.getPath('home');
-      const filePath = `${homeDir}/.gluon/chats/${sid}.json`;
+      const filePath = `${homeDir}/.gluon/chats/${deleteSessionId}.json`;
 
       const result = await window.electron.fs.delete(filePath);
       if (result.success) {
-        setChatHistory(prev => prev.filter(s => s.id !== sid));
+        setChatHistory(prev => prev.filter(s => s.id !== deleteSessionId));
 
         // If deleted current active session
-        if (sid === sessionId) {
+        if (deleteSessionId === sessionId) {
           handleNewChat();
         }
       }
     } catch (err) {
       console.error('Failed to delete session:', err);
     }
+    setDeleteSessionId(null);
   };
 
   // Load specific session
@@ -307,7 +330,7 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
         const errorMessage: ChatMessage = {
           id: (Date.now() + 1).toString(),
           role: 'system',
-          content: `❌ 오류: ${error.message}`,
+          content: `오류: ${error.message}`,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errorMessage]);
@@ -509,18 +532,14 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
       <div className="ai-panel-header">
         <div className="ai-panel-title">
           <h3 style={{
-            fontSize: '15px',
-            fontWeight: '800',
+            fontSize: '13px',
+            fontWeight: '500',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
             maxWidth: '300px',
-            background: 'linear-gradient(135deg, #C792EA 0%, #89DDFF 100%)',
-            backgroundClip: 'text',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            letterSpacing: '1px',
-            filter: 'drop-shadow(0 0 2px rgba(137, 221, 255, 0.3))'
+            color: 'rgba(255, 255, 255, 0.7)',
+            letterSpacing: '0.2px',
           }}>
             {showHistory ? 'History' : headerTitle}
           </h3>
@@ -528,7 +547,7 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
         <div className="ai-header-actions">
           {user && (
             <>
-              <button className="icon-button" onClick={() => { handleNewChat(); }} title="New Chat" style={{ color: '#89DDFF' }}>
+              <button className="icon-button" onClick={() => { handleNewChat(); }} title="New Chat">
                 <PlusIcon size={16} />
               </button>
               <button
@@ -557,16 +576,7 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
               {user ? (
                 <>
                   <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-                    <h2 style={{
-                      fontSize: '28px',
-                      fontWeight: '800',
-                      background: 'linear-gradient(135deg, #ffffff 0%, #89DDFF 100%)',
-                      backgroundClip: 'text',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      margin: 0,
-                      letterSpacing: '0.5px',
-                    }}>
+                    <h2 className="hello-greeting">
                       Hello, {user.full_name?.split(' ')[0] || 'Captain'}
                     </h2>
                     <p style={{ color: 'var(--text-secondary)', marginTop: '8px', fontSize: '14px' }}>
@@ -590,31 +600,8 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
                   }}>
                     <InfinityIcon size={32} style={{ color: 'var(--accent-blue)' }} />
                   </div>
-                  <button
-                    onClick={() => useAuthStore.getState().login()}
-                    className="ai-login-button"
-                    style={{
-                      padding: '10px 24px',
-                      fontSize: '14px',
-                      fontWeight: 600,
-                      backgroundColor: 'var(--accent-blue)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      transition: 'background-color 0.2s',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}
-                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--accent-blue-hover)'}
-                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--accent-blue)'}
-                  >
-                    <ChatBubbleIcon size={16} />
-                    <span>Sign in with Gluon</span>
-                  </button>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', opacity: 0.7 }}>
-                    Cloud-powered AI navigation
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', opacity: 0.7, textAlign: 'center' }}>
+                    로그인이 필요합니다
                   </p>
                 </div>
               )}
@@ -627,7 +614,12 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
               {messages.map((message) => (
                 <div key={message.id} className={`ai-message ai-message-${message.role}`}>
                   {message.role === 'assistant' && !message.content && isLoading ? (
-                    <div className="ai-message-content ai-thinking-wave"><span className="wave-dot"></span><span className="wave-dot"></span><span className="wave-dot"></span></div>
+                    <div className="ai-message-content ai-thinking-wave">
+                      <span className="wave-dot"></span>
+                      <span className="wave-dot"></span>
+                      <span className="wave-dot"></span>
+                      <span className="loading-timer">{loadingSeconds}s</span>
+                    </div>
                   ) : (
                     <div className="ai-message-content group">
                       <MarkdownRenderer
@@ -651,6 +643,20 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
 
       {/* Floating Dropdown (Always rendered but conditional logic inside handles visibility) */}
       {renderFloatingDropdown()}
+
+      {/* 대화 삭제 확인 모달 */}
+      {deleteSessionId && (
+        <div className="modal-overlay" onClick={() => setDeleteSessionId(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3>대화 삭제</h3>
+            <p>이 대화를 삭제하시겠습니까?</p>
+            <div className="modal-actions" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button className="modal-btn cancel" onClick={() => setDeleteSessionId(null)}>취소</button>
+              <button className="modal-btn delete" onClick={doDeleteSession}>삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

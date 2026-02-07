@@ -34,12 +34,31 @@ export const gluonQuantumTheme: editor.IStandaloneThemeData = {
         'editor.background': '#0B0C15', // Deep Space Void (더 어둡고 푸른 기운)
         'editor.foreground': '#E0E0E0',
         'editorCursor.foreground': '#00FFF0', // Neon Cyan Cursor (양자 관측기)
-        'editor.lineHighlightBackground': '#1F2233', // Event Horizon (선택 라인)
+        'editor.lineHighlightBackground': '#00000000', // Disabled line highlight
+        'editor.lineHighlightBorder': '#00000000', // Disabled line highlight border
         'editor.selectionBackground': '#3e445180',
         'editorLineNumber.foreground': '#4A5668',
-        'editorLineNumber.activeForeground': '#C792EA',
+        'editorLineNumber.activeForeground': '#FFD700', // 골드 노란색
         'editorIndentGuide.background': '#2C323C',
         'editorIndentGuide.activeBackground': '#89DDFF',
         'editorWhitespace.foreground': '#3B4252',
+        // Context Menu Colors
+        'menu.background': '#1E1E2E',
+        'menu.foreground': '#E0E0E0',
+        'menu.selectionBackground': '#0078D4',
+        'menu.selectionForeground': '#FFFFFF',
+        'menu.separatorBackground': '#3B4252',
+        'menu.border': '#3B4252',
+        // Dropdown (Command Palette, etc.)
+        'dropdown.background': '#1E1E2E',
+        'dropdown.foreground': '#E0E0E0',
+        'dropdown.border': '#3B4252',
+        // Widget (Hover, Suggest, etc.)
+        'editorWidget.background': '#1E1E2E',
+        'editorWidget.border': '#3B4252',
+        'editorSuggestWidget.background': '#1E1E2E',
+        'editorSuggestWidget.border': '#3B4252',
+        'editorSuggestWidget.selectedBackground': '#0078D4',
     }
 };
+

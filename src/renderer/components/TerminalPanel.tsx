@@ -164,12 +164,45 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
       }
     };
 
+    const handleSwitchTabEvent = (e: CustomEvent<{ direction: 'prev' | 'next' }>) => {
+      if (tabs.length <= 1) return;
+      const currentIndex = tabs.findIndex(t => t.id === activeTabId);
+      let nextIndex: number;
+      if (e.detail.direction === 'prev') {
+        nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
+      } else {
+        nextIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0;
+      }
+      setActiveTabId(tabs[nextIndex].id);
+    };
+
+    const handleCloseTabEvent = () => {
+      if (activeTabId) {
+        handleCloseTab(activeTabId);
+      }
+    };
+
+    const handleFocusEvent = () => {
+      if (activeTabId) {
+        const tab = tabs.find(t => t.id === activeTabId);
+        if (tab && tab.type === 'terminal') {
+          (tab as TerminalTab).term.focus();
+        }
+      }
+    };
+
     window.addEventListener('gluon:run-command', handleRunCommand as EventListener);
     window.addEventListener('gluon:open-problems', handleOpenProblems as EventListener);
+    window.addEventListener('terminal-switch-tab', handleSwitchTabEvent as EventListener);
+    window.addEventListener('terminal-close-tab', handleCloseTabEvent);
+    window.addEventListener('terminal-focus', handleFocusEvent);
 
     return () => {
       window.removeEventListener('gluon:run-command', handleRunCommand as EventListener);
       window.removeEventListener('gluon:open-problems', handleOpenProblems as EventListener);
+      window.removeEventListener('terminal-switch-tab', handleSwitchTabEvent as EventListener);
+      window.removeEventListener('terminal-close-tab', handleCloseTabEvent);
+      window.removeEventListener('terminal-focus', handleFocusEvent);
     };
   }, [activeTabId, tabs, diagnostics]);
 
@@ -292,6 +325,16 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
       const clipboardAddon = new ClipboardAddon();
       term.loadAddon(clipboardAddon);
 
+      // Escape → 에디터로 포커스 이동
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type === 'keydown' && e.key === 'Escape') {
+          const editor = document.querySelector('.monaco-editor textarea') as HTMLElement;
+          if (editor) editor.focus();
+          return false; // xterm에 이벤트 전달 안 함
+        }
+        return true;
+      });
+
       // WebGL Addon for performance
       let webglAddon: WebglAddon | undefined;
       try {
@@ -390,7 +433,12 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
 
       // 활성 탭이 닫히면 다른 탭으로 전환
       if (activeTabId === tabId && filtered.length > 0) {
-        setActiveTabId(filtered[filtered.length - 1].id);
+        const nextTab = filtered[filtered.length - 1];
+        setActiveTabId(nextTab.id);
+        // 남은 터미널에 포커스 유지
+        if (nextTab.type === 'terminal') {
+          setTimeout(() => (nextTab as TerminalTab).term.focus(), 50);
+        }
       } else if (filtered.length === 0) {
         setActiveTabId(null);
       }
@@ -682,26 +730,18 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
           </div>
         )}
       </div>
-      {/* Context Menu ... */}
-      {
-        contextMenu && contextMenu.show && (
-          <div
-            className="terminal-context-menu"
-            style={{
-              position: 'fixed',
-              // ...
-              top: contextMenu.y,
-              left: contextMenu.x,
-              zIndex: 9999
-            }}
-          >
-            <div className="context-menu-item" onClick={handleCopy}>Copy</div>
-            <div className="context-menu-item" onClick={handlePaste}>Paste</div>
-            <div className="context-menu-separator" />
-            <div className="context-menu-item" onClick={handleClear}>Clear</div>
-          </div>
-        )
-      }
+      {/* Context Menu */}
+      {contextMenu && contextMenu.show && (
+        <div
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <div className="context-menu-item" onClick={handleCopy}>Copy</div>
+          <div className="context-menu-item" onClick={handlePaste}>Paste</div>
+          <div className="context-menu-separator" />
+          <div className="context-menu-item" onClick={handleClear}>Clear</div>
+        </div>
+      )}
     </div >
   );
 }

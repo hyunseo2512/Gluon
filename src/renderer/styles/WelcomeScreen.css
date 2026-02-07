@@ -49,12 +49,12 @@
     font-weight: 800;
     letter-spacing: 2px;
     margin: 0;
-    /* Neon Gradient: Violet -> Cyan */
-    background: linear-gradient(135deg, #C792EA 0%, #89DDFF 100%);
+    /* Neon Gradient: Violet -> Blue */
+    background: linear-gradient(135deg, #BB86FC 0%, #00BFFF 100%);
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 0 10px rgba(199, 146, 234, 0.3));
+    filter: drop-shadow(0 0 10px rgba(0, 191, 255, 0.3));
 }
 
 .welcome-version {
@@ -80,7 +80,7 @@
     padding: 24px;
     /* Glassmorphism Dark */
     background-color: rgba(30, 34, 45, 0.4);
-    border: 1px solid rgba(137, 221, 255, 0.1);
+    border: 1px solid rgba(0, 191, 255, 0.1);
     backdrop-filter: blur(10px);
     border-radius: 12px;
     width: 200px;
@@ -98,20 +98,23 @@
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, rgba(137, 221, 255, 0.1) 0%, transparent 100%);
+    background: linear-gradient(135deg, rgba(0, 191, 255, 0.1) 0%, transparent 100%);
     opacity: 0;
     transition: opacity 0.3s ease;
 }
 
-.welcome-action-card:hover {
+.welcome-action-card:hover,
+.welcome-action-card:focus-visible {
     background-color: rgba(30, 34, 45, 0.7);
     transform: translateY(-4px);
-    border-color: #89DDFF;
-    /* Cyan Border */
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(137, 221, 255, 0.2);
+    border-color: #00BFFF;
+    /* Neon Blue Border */
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 191, 255, 0.2);
+    outline: none;
 }
 
-.welcome-action-card:hover::after {
+.welcome-action-card:hover::after,
+.welcome-action-card:focus-visible::after {
     opacity: 1;
 }
 
@@ -121,10 +124,11 @@
     transition: color 0.3s ease, transform 0.3s ease;
 }
 
-.welcome-action-card:hover .action-icon {
-    color: #89DDFF;
+.welcome-action-card:hover .action-icon,
+.welcome-action-card:focus-visible .action-icon {
+    color: #00BFFF;
     transform: scale(1.1);
-    filter: drop-shadow(0 0 8px rgba(137, 221, 255, 0.5));
+    filter: drop-shadow(0 0 8px rgba(0, 191, 255, 0.5));
 }
 
 .action-text h3 {
@@ -184,10 +188,12 @@
     border: 1px solid transparent;
 }
 
-.recent-item:hover {
-    background-color: rgba(137, 221, 255, 0.05);
-    border-color: rgba(137, 221, 255, 0.1);
+.recent-item:hover,
+.recent-item:focus-visible {
+    background-color: rgba(0, 191, 255, 0.05);
+    border-color: rgba(0, 191, 255, 0.1);
     transform: translateX(4px);
+    outline: none;
 }
 
 .recent-name {
@@ -210,7 +216,8 @@
     transition: all 0.2s;
 }
 
-.recent-item:hover .recent-remove {
+.recent-item:hover .recent-remove,
+.recent-item:focus-visible .recent-remove {
     opacity: 1;
 }
 

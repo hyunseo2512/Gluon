@@ -49,8 +49,8 @@ function createWindow(): void {
 
   // 아이콘 경로 (개발/프로덕션 모드 대응)
   const iconPath = isDev
-    ? path.join(__dirname, '../../public/icons/icon.png')
-    : path.join(__dirname, '../public/icons/icon.png');
+    ? path.join(__dirname, '../../public/icons/gluon-512.svg')
+    : path.join(__dirname, '../public/icons/gluon-512.svg');
 
   const win = new BrowserWindow({
     width: 1400,
@@ -88,6 +88,14 @@ function createWindow(): void {
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
+
+  // Ctrl+W를 탭 닫기로 사용 — Electron 기본 동작 방지 후 renderer에 커스텀 이벤트 전송
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.control && !input.shift && !input.alt && input.key.toLowerCase() === 'w') {
+      event.preventDefault();
+      win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('close-active-tab'))`).catch(() => { });
+    }
+  });
 
   // 윈도우가 닫힐 때
   win.on('closed', () => {
@@ -187,8 +195,91 @@ function setupIpcHandlers(): void {
     if (sshManager) sshManager.resize(cols, rows);
   });
 
-  // Linter
-  ipcMain.handle('linter:check', async (_event, filePath) => {
+  // ========== SFTP Handlers ==========
+  ipcMain.handle('sftp:start', async () => {
+    if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
+    try {
+      await sshManager.startSftp();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('sftp:list', async (_event, remotePath: string) => {
+    if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
+    try {
+      const files = await sshManager.listDirectory(remotePath);
+      return { success: true, files };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('sftp:read', async (_event, remotePath: string) => {
+    if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
+    try {
+      const content = await sshManager.readFile(remotePath);
+      return { success: true, content };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('sftp:write', async (_event, remotePath: string, content: string) => {
+    if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
+    try {
+      await sshManager.writeFile(remotePath, content);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('sftp:mkdir', async (_event, remotePath: string) => {
+    if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
+    try {
+      await sshManager.createDirectory(remotePath);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('sftp:delete', async (_event, remotePath: string, isDirectory: boolean) => {
+    if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
+    try {
+      if (isDirectory) {
+        await sshManager.deleteDirectory(remotePath);
+      } else {
+        await sshManager.deleteFile(remotePath);
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('sftp:stat', async (_event, remotePath: string) => {
+    if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
+    try {
+      const stat = await sshManager.stat(remotePath);
+      return { success: true, stat };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Linter (Python/C/C++ 지원)
+  ipcMain.handle('linter:check', async (_event, filePath: string) => {
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+
+    // C/C++ 파일
+    if (['c', 'h', 'cpp', 'cc', 'cxx', 'hpp', 'hh', 'hxx'].includes(ext)) {
+      return await linterService.checkC(filePath);
+    }
+
+    // Python 파일 (기본)
     return await linterService.checkPython(filePath);
   });
 
@@ -209,15 +300,91 @@ function setupIpcHandlers(): void {
     }
   });
 
+  // 파일 시스템 감시 (chokidar 사용 - Linux 호환)
+  const chokidar = require('chokidar');
+  const activeWatchers = new Map<string, any>();
+
+  ipcMain.handle('fs:watch', async (event, dirPath: string) => {
+    try {
+      // 이미 감시 중이면 중복 생성 방지
+      if (activeWatchers.has(dirPath)) {
+        return { success: true, message: 'Already watching' };
+      }
+
+      const watcher = chokidar.watch(dirPath, {
+        ignored: /(^|[\/\\])(\.|node_modules|\.git)/, // 숨김 파일, node_modules, .git 무시
+        persistent: true,
+        ignoreInitial: true, // 초기 스캔 이벤트 무시
+        depth: 10, // 최대 깊이
+      });
+
+      watcher
+        .on('add', (filePath: string) => {
+          console.log('[Chokidar] File added:', filePath);
+          event.sender.send('fs:watch-event', {
+            type: 'add',
+            filename: filePath.replace(dirPath + '/', ''),
+            dirPath
+          });
+        })
+        .on('unlink', (filePath: string) => {
+          console.log('[Chokidar] File removed:', filePath);
+          event.sender.send('fs:watch-event', {
+            type: 'unlink',
+            filename: filePath.replace(dirPath + '/', ''),
+            dirPath
+          });
+        })
+        .on('addDir', (filePath: string) => {
+          console.log('[Chokidar] Directory added:', filePath);
+          event.sender.send('fs:watch-event', {
+            type: 'addDir',
+            filename: filePath.replace(dirPath + '/', ''),
+            dirPath
+          });
+        })
+        .on('unlinkDir', (filePath: string) => {
+          console.log('[Chokidar] Directory removed:', filePath);
+          event.sender.send('fs:watch-event', {
+            type: 'unlinkDir',
+            filename: filePath.replace(dirPath + '/', ''),
+            dirPath
+          });
+        })
+        .on('error', (err: Error) => {
+          console.error('[Chokidar] Watch error:', err);
+        });
+
+      activeWatchers.set(dirPath, watcher);
+      console.log('[Chokidar] Started watching:', dirPath);
+      return { success: true };
+    } catch (error: any) {
+      console.error('Failed to watch directory:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('fs:unwatch', async (_event, dirPath: string) => {
+    try {
+      const watcher = activeWatchers.get(dirPath);
+      if (watcher) {
+        watcher.close();
+        activeWatchers.delete(dirPath);
+      }
+      return { success: true };
+    } catch (error: any) {
+      console.error('Failed to unwatch directory:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // 폴더 선택 다이얼로그
   ipcMain.handle('dialog:openDirectory', async () => {
     const { dialog, BrowserWindow } = require('electron');
     try {
-      // [FIX] 항상 메인 윈도우를 부모로 지정하여 모달로 열리게 함
-      const win = BrowserWindow.getFocusedWindow();
+      const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
       const result = await dialog.showOpenDialog(win || undefined, {
         properties: ['openDirectory'],
-        modal: true // 리눅스/macOS 등에서 명시적 모달 힌트 (일부 OS는 무시될 수 있음)
       });
       if (result.canceled) {
         return { success: false, canceled: true };
@@ -233,7 +400,7 @@ function setupIpcHandlers(): void {
   ipcMain.handle('dialog:openFile', async () => {
     const { dialog, BrowserWindow } = require('electron');
     try {
-      const win = BrowserWindow.getFocusedWindow();
+      const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
       const result = await dialog.showOpenDialog(win || undefined, {
         properties: ['openFile'],
         filters: [
@@ -262,11 +429,11 @@ function setupIpcHandlers(): void {
   ipcMain.handle('dialog:saveFile', async () => {
     const { dialog, BrowserWindow } = require('electron');
     try {
-      const win = BrowserWindow.getFocusedWindow();
+      const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
       const result = await dialog.showSaveDialog(win || undefined, {
         title: '새 파일 저장',
         buttonLabel: '저장',
-        defaultPath: require('os').homedir(), // 홈 디렉토리를 기본 경로로 설정
+        defaultPath: require('os').homedir(),
         filters: [
           { name: 'All Files', extensions: ['*'] },
           { name: 'Text Files', extensions: ['txt', 'md'] },
@@ -542,6 +709,68 @@ function setupIpcHandlers(): void {
       return { success: true };
     } catch (error: any) {
       console.error(`Failed to set store key ${key}:`, error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // --- Settings JSON File Handlers ---
+  const fsSync = require('fs'); // 동기 fs 함수용
+  const settingsDir = path.join(app.getPath('userData'), 'User');
+  const settingsPath = path.join(settingsDir, 'settings.json');
+
+  // 기본 설정 (초기 파일 생성 시 사용)
+  const defaultSettings = {
+    "editor.fontSize": 14,
+    "editor.fontFamily": "'Fira Code', 'Consolas', monospace",
+    "editor.fontLigatures": true,
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.wordWrap": false,
+    "editor.minimap": false,
+    "editor.lineNumbers": true,
+    "editor.formatOnSave": false
+  };
+
+  // settings.json 경로 반환
+  ipcMain.handle('settings:getPath', () => {
+    // 디렉토리가 없으면 생성
+    if (!fsSync.existsSync(settingsDir)) {
+      fsSync.mkdirSync(settingsDir, { recursive: true });
+    }
+    // 파일이 없으면 기본값으로 생성
+    if (!fsSync.existsSync(settingsPath)) {
+      fsSync.writeFileSync(settingsPath, JSON.stringify(defaultSettings, null, 2), 'utf8');
+    }
+    return settingsPath;
+  });
+
+  // settings.json 읽기
+  ipcMain.handle('settings:read', () => {
+    try {
+      if (!fsSync.existsSync(settingsDir)) {
+        fsSync.mkdirSync(settingsDir, { recursive: true });
+      }
+      if (!fsSync.existsSync(settingsPath)) {
+        fsSync.writeFileSync(settingsPath, JSON.stringify(defaultSettings, null, 2), 'utf8');
+      }
+      const content = fsSync.readFileSync(settingsPath, 'utf8');
+      return { success: true, data: JSON.parse(content) };
+    } catch (error: any) {
+      console.error('Failed to read settings.json:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // settings.json 저장
+  ipcMain.handle('settings:write', (_event, settings: object) => {
+    try {
+      if (!fsSync.existsSync(settingsDir)) {
+        fsSync.mkdirSync(settingsDir, { recursive: true });
+      }
+      fsSync.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+      return { success: true };
+    } catch (error: any) {
+      console.error('Failed to write settings.json:', error);
       return { success: false, error: error.message };
     }
   });

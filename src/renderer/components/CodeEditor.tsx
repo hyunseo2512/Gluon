@@ -1,13 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
 import Editor, { DiffEditor, useMonaco, loader } from '@monaco-editor/react';
 import '../styles/CodeEditor.css';
-import { FileIcon, getIconForFile, ChevronLeftIcon, ChevronRightIcon } from './Icons';
+import { getIconForFile, ChevronLeftIcon, ChevronRightIcon } from './Icons';
+import MarkdownPreview from './MarkdownPreview';
 import { gluonQuantumTheme } from '../themes/gluonQuantum';
+import { gluonCarbonTheme } from '../themes/gluonCarbon';
+import { gluonMarkdownTheme } from '../themes/gluonMarkdown';
+import { emmetHTML, emmetCSS, emmetJSX } from 'emmet-monaco-es';
 
 // Initialize Monaco Globally (Theme & Compiler Options)
 loader.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
 
 loader.init().then((monaco) => {
+  // Initialize Emmet for HTML, CSS, JSX
+  emmetHTML(monaco);
+  emmetCSS(monaco);
+  emmetJSX(monaco);
   // Compiler Options
   const compilerOptions = {
     target: monaco.languages.typescript.ScriptTarget.ES2020,
@@ -30,7 +38,13 @@ loader.init().then((monaco) => {
   // 1. Gluon Quantum (Python/SF Style)
   monaco.editor.defineTheme('gluon-quantum', gluonQuantumTheme);
 
-  // 2. Gluon Classic (VS Dark + Gluon Background)
+  // 2. Gluon Carbon (C/C++ Style)
+  monaco.editor.defineTheme('gluon-carbon', gluonCarbonTheme);
+
+  // 3. Gluon Markdown (Markdown Specific)
+  monaco.editor.defineTheme('gluon-markdown', gluonMarkdownTheme);
+
+  // 4. Gluon Classic (VS Dark + Gluon Background)
   monaco.editor.defineTheme('gluon-classic', {
     base: 'vs-dark',
     inherit: true,
@@ -71,7 +85,38 @@ interface CodeEditorProps {
   onReorderTabs?: (fromIndex: number, toIndex: number) => void;
   onDiagnosticsChange?: (errors: number, warnings: number, markers: any[]) => void;
   settings?: any;
+  workspaceDir?: string;
 }
+
+// 바이너리 파일 확장자 목록
+const BINARY_EXTENSIONS = new Set([
+  'pyc', 'pyd', 'pyo', 'class', 'jar', 'war', 'ear',
+  'exe', 'dll', 'so', 'dylib', 'bin', 'dat', 'o', 'a',
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'tiff', 'tif',
+  'mp3', 'mp4', 'avi', 'mov', 'mkv', 'wav', 'flac', 'ogg', 'webm',
+  'zip', 'gz', 'tar', 'bz2', 'xz', '7z', 'rar',
+  'woff', 'woff2', 'ttf', 'otf', 'eot',
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+  'sqlite', 'db', 'mdb',
+  'wasm',
+]);
+
+const isBinaryFile = (filePath: string, content?: string): boolean => {
+  // 1. 확장자 기반 체크
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  if (ext && BINARY_EXTENSIONS.has(ext)) return true;
+  // 2. 내용 기반 체크: null 바이트 또는 제어 문자 포함 여부 (첫 8KB)
+  if (content) {
+    const sample = content.slice(0, 8192);
+    for (let i = 0; i < sample.length; i++) {
+      const code = sample.charCodeAt(i);
+      if (code === 0) return true; // null byte
+      // 탭(9), 줄바꿈(10), 캐리지리턴(13) 제외한 제어 문자
+      if (code < 8 || (code > 13 && code < 32 && code !== 27)) return true;
+    }
+  }
+  return false;
+};
 
 /**
  * 코드 에디터 컴포넌트 (Monaco Editor) - 여러 파일 탭 지원
@@ -88,14 +133,26 @@ function CodeEditor({
   onSave,
   onReorderTabs,
   onDiagnosticsChange,
-  settings
+  settings,
+  workspaceDir
 }: CodeEditorProps) {
   const [language, setLanguage] = useState('javascript');
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [forceOpenBinary, setForceOpenBinary] = useState<Set<string>>(new Set());
+  const [markdownPreview, setMarkdownPreview] = useState(false);
 
   const activeFile = activeFileIndex >= 0 ? openFiles[activeFileIndex] : null;
+  const isBinary = activeFile ? isBinaryFile(activeFile.path, activeFile.content) && !forceOpenBinary.has(activeFile.path) : false;
+  const isMarkdown = language === 'markdown';
   const [fileErrors, setFileErrors] = useState<{ [path: string]: number }>({});
   const monaco = useMonaco();
+
+  // Markdown Preview Toggle via custom event
+  useEffect(() => {
+    const handleToggle = () => setMarkdownPreview(prev => !prev);
+    window.addEventListener('markdown-preview-toggle', handleToggle);
+    return () => window.removeEventListener('markdown-preview-toggle', handleToggle);
+  }, []);
 
   // Listen to Monaco Markers (Errors)
   useEffect(() => {
@@ -166,82 +223,38 @@ function CodeEditor({
     setLanguage(langMap[ext || ''] || 'plaintext');
   }, [activeFile?.path]);
 
-  // Syntax Check (Python Linter)
+  // Syntax Check (Python/C/C++ Linter)
   useEffect(() => {
-    if (!monaco || !activeFile || language !== 'python') return;
+    if (!monaco || !activeFile) return;
+
+    // 지원되는 언어만 린터 호출
+    const supportedLanguages = ['python', 'c', 'cpp'];
+    if (!supportedLanguages.includes(language)) return;
 
     const checkSyntax = async () => {
-      // 1. Clear previous validation markers
-      // Actually don't clear until new ones arrive to prevent flickering?
-      // Or monaco handles it. 
-      // If we don't clear, and file changed, markers might be stale.
-      // But we are sending current file path.
-      // Wait, linter checks FILE on disk.
-      // If user typed but didn't save, the file on disk is OLD.
-      // CRITICAL: pylint checks file on DISK.
-      // We must either:
-      // A) Save to temp file and lint that.
-      // B) Only lint on save.
-      // C) Pass content via stdin to pylint (pylint supports stdin via hacks or --from-stdin equivalent? No, pylint is file-based mostly).
-      // Standard pylint: `pylint module_or_package`.
-
-      // If we only check on Save, it's easier.
-      // User asked for "Background", implying real-time.
-      // But `pylint` on dirty file requires temp file.
-      // "Save to temp" approach is best for real-time.
-      // OR use `flake8` which might support stdin better?
-      // `pylint --from-stdin` exists in newer versions?
-
-      // For now, let's implement "Check on Save" OR "Check Disk File".
-      // If I want real-time typing check, I must write content to a temp file.
-      // `linterService` takes `filePath`.
-      // I can add `checkPythonContent(content)` to backend later.
-      // For now, let's stick to "Check file on disk" for simplicity and robustness, 
-      // effectively checking what is saved? 
-      // NO, user expects to see errors as they type (or at least after pause).
-      // If file is dirty, checking disk file shows errors for OLD code.
-
-      // Let's rely on the fact that `App.tsx` handles saving? 
-      // No, user types.
-      // I will implement "Save to Temp" in backend?
-      // Or just warn user "Linting works on saved files".
-
-      // Let's modify `linterService` later to accept content?
-      // For this step, I'll pass the `filePath` but acknowledge it checks saved content.
-      // Auto-save is not enabled by default.
-
-      // Refined Plan:
-      // 1. Check `filePath`.
-      // 2. If valid, call linter.
-      // 3. User might need to save. 
-      // But wait, many users configure "Auto Save". 
-      // If I want to impress, I should support temp files.
-      // But `Main` process has `fs`.
-      // I'll update `LinterService` to support content later if needed.
-      // For now, just call it.
-
       try {
         const issues = await window.electron.linter.check(activeFile.path);
 
         // Map to Monaco markers
         const markers = issues.map((issue: any) => ({
           startLineNumber: issue.line,
-          startColumn: issue.column === 0 ? 1 : issue.column + 1, // Pylint 0-indexed column? check docs. Usually 0. Monaco 1.
+          startColumn: issue.column === 0 ? 1 : issue.column,
           endLineNumber: issue.line,
-          endColumn: 1000, // Highlight whole line or assume token length? Pylint doesn't give length easily.
+          endColumn: 1000, // Highlight whole line
           message: `${issue.message} (${issue.messageId})`,
           severity: issue.type === 'error' || issue.type === 'fatal'
             ? monaco.MarkerSeverity.Error
             : issue.type === 'warning'
               ? monaco.MarkerSeverity.Warning
               : monaco.MarkerSeverity.Info,
-          source: 'pylint'
+          source: language === 'python' ? 'ruff' : 'gcc'
         }));
 
         // Find the correct model
         const model = monaco.editor.getModels().find(m => m.uri.path === activeFile.path || m.uri.fsPath === activeFile.path) || monaco.editor.getModels()[0];
         if (model) {
-          monaco.editor.setModelMarkers(model, 'pylint', markers);
+          const source = language === 'python' ? 'ruff' : 'gcc';
+          monaco.editor.setModelMarkers(model, source, markers);
         } else {
           console.warn('Monaco model not found for:', activeFile.path);
         }
@@ -256,7 +269,7 @@ function CodeEditor({
 
   const [editorInstance, setEditorInstance] = useState<any>(null);
 
-  // Ctrl+S로 저장 (Format On Save 지원)
+  // Ctrl+S로 저장 (Format On Save 지원) + ESC로 에디터 포커스
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 's') {
@@ -276,6 +289,11 @@ function CodeEditor({
         setTimeout(() => {
           onSave();
         }, 50);
+      }
+
+      // ESC → 에디터 포커스
+      if (e.key === 'Escape' && editorInstance) {
+        editorInstance.focus();
       }
     };
 
@@ -443,25 +461,11 @@ function CodeEditor({
       {contextMenu && (
         <div
           className="context-menu"
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            zIndex: 1000,
-            backgroundColor: '#252526',
-            border: '1px solid #454545',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
-            borderRadius: '4px',
-            padding: '4px 0',
-            minWidth: '150px'
-          }}
+          style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
           <div
             className="context-menu-item"
-            style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc', display: 'flex', justifyContent: 'space-between' }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={() => {
               onCloseTab(contextMenu.index);
               setContextMenu(null);
@@ -471,9 +475,6 @@ function CodeEditor({
           </div>
           <div
             className="context-menu-item"
-            style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={() => {
               onCloseOthers?.(contextMenu.index);
               setContextMenu(null);
@@ -483,9 +484,6 @@ function CodeEditor({
           </div>
           <div
             className="context-menu-item"
-            style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={() => {
               onCloseToRight?.(contextMenu.index);
               setContextMenu(null);
@@ -495,9 +493,6 @@ function CodeEditor({
           </div>
           <div
             className="context-menu-item"
-            style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={() => {
               onCloseAll?.();
               setContextMenu(null);
@@ -505,12 +500,9 @@ function CodeEditor({
           >
             Close All
           </div>
-          <div style={{ height: '1px', backgroundColor: '#454545', margin: '4px 0' }}></div>
+          <div className="context-menu-separator"></div>
           <div
             className="context-menu-item"
-            style={{ padding: '6px 16px', cursor: 'pointer', fontSize: '13px', color: '#cccccc' }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#094771'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={() => {
               onSave(contextMenu.index);
               setContextMenu(null);
@@ -524,18 +516,60 @@ function CodeEditor({
       {/* Monaco Editor or Diff Editor */}
       {activeFile ? (
         <div className="editor-container">
-          {activeFile.isDiff ? (
+          {/* File Path Breadcrumb */}
+          {workspaceDir && activeFile.path && (() => {
+            const relativePath = activeFile.path.startsWith(workspaceDir)
+              ? activeFile.path.slice(workspaceDir.length + 1)
+              : activeFile.path;
+            const segments = relativePath.split('/');
+            const fileName = segments.pop() || '';
+            const FileIcon = getIconForFile(fileName);
+
+            return (
+              <div className="file-breadcrumb">
+                {segments.length > 0 && (
+                  <span>{segments.join(' > ')} &gt; </span>
+                )}
+                {FileIcon}
+                <span style={{ marginLeft: 4 }}>{fileName}</span>
+              </div>
+            );
+          })()}
+          {isBinary ? (
+            <div className="binary-file-warning">
+              <div className="binary-warning-card">
+                <div className="binary-warning-icon">
+                  {getIconForFile(activeFile!.path, 48)}
+                </div>
+                <div className="binary-warning-ext">
+                  .{activeFile!.path.split('.').pop()?.toUpperCase()}
+                </div>
+                <p className="binary-file-message">
+                  This file is binary or uses an unsupported encoding.<br />
+                  Opening it may display unreadable content.
+                </p>
+                <button
+                  className="binary-open-anyway"
+                  onClick={() => {
+                    setForceOpenBinary(prev => new Set(prev).add(activeFile!.path));
+                  }}
+                >
+                  Open Anyway
+                </button>
+              </div>
+            </div>
+          ) : activeFile.isDiff ? (
             <DiffEditor
               height="100%"
               language={language}
               original={activeFile.originalContent}
               modified={activeFile.modifiedContent}
-              theme={language === 'python' ? 'gluon-quantum' : 'gluon-classic'}
+              theme={language === 'markdown' ? 'gluon-markdown' : language === 'python' ? 'gluon-quantum' : (language === 'c' || language === 'cpp') ? 'gluon-carbon' : 'gluon-classic'}
               options={{
                 renderSideBySide: true,
-                fontSize: 14,
+                fontSize: settings?.fontSize ?? 14,
                 fontFamily: "'Fira Code', 'Consolas', monospace",
-                minimap: { enabled: false },
+                minimap: { enabled: settings?.minimap ?? false },
                 fixedOverflowWidgets: true,
                 scrollBeyondLastLine: false,
                 renderOverviewRuler: false,
@@ -545,17 +579,33 @@ function CodeEditor({
                 mouseWheelZoom: true
               }}
             />
+          ) : (isMarkdown && markdownPreview) ? (
+            <MarkdownPreview
+              content={activeFile.content}
+              fileName={activeFile.path.split('/').pop()}
+            />
           ) : (
             <Editor
               height="100%"
-              path={activeFile.path} // Critical for Monaco to associate markers with file path
+              path={activeFile.path}
               language={language}
-              onMount={(editor) => setEditorInstance(editor)}
+              onMount={(editor) => {
+                setEditorInstance(editor);
+                if (monaco) {
+                  editor.addCommand(
+                    monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,
+                    () => editor.trigger('source', 'editor.action.copyLinesUpAction', null)
+                  );
+                  editor.addCommand(
+                    monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow,
+                    () => editor.trigger('source', 'editor.action.copyLinesDownAction', null)
+                  );
+                }
+              }}
               value={activeFile.content}
               onChange={handleEditorChange}
-              theme={language === 'python' ? 'gluon-quantum' : 'gluon-classic'}
+              theme={language === 'markdown' ? 'gluon-markdown' : language === 'python' ? 'gluon-quantum' : (language === 'c' || language === 'cpp') ? 'gluon-carbon' : 'gluon-classic'}
               beforeMount={(monaco) => {
-                // Prettier Formatter 등록
                 const configurePrettier = (lang: string, parser: string, plugins: any[]) => {
                   monaco.languages.registerDocumentFormattingEditProvider(lang, {
                     async provideDocumentFormattingEdits(model, _options, _token) {
@@ -588,16 +638,17 @@ function CodeEditor({
                 configurePrettier('json', 'json', [parserBabel, parserEstree]);
               }}
               options={{
-
-                fontSize: 14,
-                fontFamily: "'Fira Code', 'Consolas', monospace",
-                minimap: { enabled: false },
-                lineNumbers: 'on',
+                fontSize: settings?.fontSize ?? 14,
+                fontFamily: settings?.fontFamily ?? "'Fira Code', 'Consolas', monospace",
+                fontLigatures: settings?.fontLigatures ?? true,
+                minimap: { enabled: settings?.minimap ?? false },
+                lineNumbers: settings?.lineNumbers ? 'on' : 'off',
                 roundedSelection: true,
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
-                tabSize: 2,
-                wordWrap: 'on',
+                tabSize: settings?.tabSize ?? 2,
+                insertSpaces: settings?.insertSpaces ?? true,
+                wordWrap: settings?.wordWrap ? 'on' : 'off',
                 mouseWheelZoom: true,
               }}
             />
@@ -606,23 +657,17 @@ function CodeEditor({
       ) : (
         <div className="editor-empty-state">
           {/* Logo */}
-          <div className="editor-empty-logo">
-            <div style={{ marginTop: '15px', textAlign: 'center' }}>
-              <h1>Gluon</h1>
-              <span className="editor-empty-version">Pro Edition</span>
-            </div>
+          <div className="empty-logo">
+            <span className="logo-text">Gluon</span>
+            <span className="logo-edition">Pro Edition</span>
           </div>
 
-          {/* Shortcuts */}
-          <div className="editor-empty-shortcuts">
-            <span className="shortcut-label">Switch to Agent Manager</span>
-            <span className="shortcut-key">Ctrl + E</span>
-
-            <span className="shortcut-label">Code with Agent</span>
-            <span className="shortcut-key">Ctrl + L</span>
-
-            <span className="shortcut-label">Edit code inline</span>
-            <span className="shortcut-key">Ctrl + I</span>
+          {/* Shortcut */}
+          <div className="empty-shortcuts" style={{ pointerEvents: 'none' }}>
+            <div className="shortcut-item">
+              <span className="shortcut-label">Code with Agent</span>
+              <span className="shortcut-key">Ctrl + L</span>
+            </div>
           </div>
         </div>
       )}

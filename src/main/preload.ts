@@ -20,6 +20,13 @@ contextBridge.exposeInMainWorld('electron', {
     exists: (pathToCheck: string) => ipcRenderer.invoke('fs:exists', pathToCheck),
     delete: (filePath: string) => ipcRenderer.invoke('fs:delete', filePath),
     copy: (source: string, destination: string) => ipcRenderer.invoke('fs:copy', source, destination),
+    watch: (dirPath: string) => ipcRenderer.invoke('fs:watch', dirPath),
+    unwatch: (dirPath: string) => ipcRenderer.invoke('fs:unwatch', dirPath),
+    onWatchEvent: (callback: (event: { type: string; filename: string; dirPath: string }) => void) => {
+      const listener = (_event: any, data: { type: string; filename: string; dirPath: string }) => callback(data);
+      ipcRenderer.on('fs:watch-event', listener);
+      return () => ipcRenderer.removeListener('fs:watch-event', listener);
+    },
   },
 
   // 다이얼로그
@@ -72,11 +79,18 @@ contextBridge.exposeInMainWorld('electron', {
   // 시스템 정보
   platform: process.platform,
 
-  // 설정 저장소
+  // 설정 저장소 (electron-store)
   store: {
     get: (key: string) => ipcRenderer.invoke('store:get', key),
     set: (key: string, value: any) => ipcRenderer.invoke('store:set', key, value),
     delete: (key: string) => ipcRenderer.invoke('store:delete', key),
+  },
+
+  // Settings JSON File API
+  settings: {
+    getPath: () => ipcRenderer.invoke('settings:getPath'),
+    read: () => ipcRenderer.invoke('settings:read'),
+    write: (settings: object) => ipcRenderer.invoke('settings:write', settings),
   },
 
   // 앱 정보/경로
@@ -137,6 +151,17 @@ contextBridge.exposeInMainWorld('electron', {
     resize: (cols: number, rows: number) => ipcRenderer.invoke('ssh:resize', cols, rows),
   },
 
+  // SFTP functionality
+  sftp: {
+    start: () => ipcRenderer.invoke('sftp:start'),
+    list: (remotePath: string) => ipcRenderer.invoke('sftp:list', remotePath),
+    read: (remotePath: string) => ipcRenderer.invoke('sftp:read', remotePath),
+    write: (remotePath: string, content: string) => ipcRenderer.invoke('sftp:write', remotePath, content),
+    mkdir: (remotePath: string) => ipcRenderer.invoke('sftp:mkdir', remotePath),
+    delete: (remotePath: string, isDirectory: boolean) => ipcRenderer.invoke('sftp:delete', remotePath, isDirectory),
+    stat: (remotePath: string) => ipcRenderer.invoke('sftp:stat', remotePath),
+  },
+
   // Chat Stream Proxy
   chat: {
     startStream: (streamId: string, url: string, body: any, headers: any) => ipcRenderer.invoke('chat:stream-start', streamId, url, body, headers),
@@ -180,6 +205,9 @@ declare global {
         exists: (pathToCheck: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>;
         delete: (filePath: string) => Promise<{ success: boolean; error?: string }>;
         copy: (source: string, destination: string) => Promise<{ success: boolean; error?: string }>;
+        watch: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
+        unwatch: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
+        onWatchEvent: (callback: (event: { type: string; filename: string; dirPath: string }) => void) => () => void;
       };
       dialog: {
         openDirectory: () => Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>;
@@ -206,6 +234,16 @@ declare global {
         getZoomLevel: () => number;
         setZoomFactor: (factor: number) => void;
         getZoomFactor: () => number;
+      };
+      linter: {
+        check: (filePath: string) => Promise<Array<{
+          line: number;
+          column: number;
+          type: 'error' | 'warning' | 'info';
+          message: string;
+          symbol: string;
+          messageId: string;
+        }>>;
       };
       platform: string;
       app: {
@@ -252,6 +290,15 @@ declare global {
         startShell: (terminalId: string) => Promise<{ success: boolean; error?: string }>;
         write: (data: string) => void;
         resize: (cols: number, rows: number) => void;
+      };
+      sftp: {
+        start: () => Promise<{ success: boolean; error?: string }>;
+        list: (remotePath: string) => Promise<{ success: boolean; files?: any[]; error?: string }>;
+        read: (remotePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+        write: (remotePath: string, content: string) => Promise<{ success: boolean; error?: string }>;
+        mkdir: (remotePath: string) => Promise<{ success: boolean; error?: string }>;
+        delete: (remotePath: string, isDirectory: boolean) => Promise<{ success: boolean; error?: string }>;
+        stat: (remotePath: string) => Promise<{ success: boolean; stat?: { isDirectory: boolean; size: number }; error?: string }>;
       };
       chat: {
         startStream: (streamId: string, url: string, body: any, headers: any) => Promise<{ success: boolean; error?: string }>;

@@ -142,8 +142,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border-color);
+  gap: 16px;
 }
 
 .setting-item:last-child {
@@ -152,9 +153,9 @@
 
 .setting-item label {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 140px;
 }
 
 .setting-label {
@@ -172,27 +173,80 @@
 .setting-item input[type="number"],
 .setting-item input[type="password"],
 .setting-item select {
-  width: 100%;
+  flex: 1;
+  max-width: 300px;
   padding: 8px 12px;
-  background-color: var(--input-bg, #3c3c3c);
-  border: 1px solid var(--border-color, #3c3c3c);
-  color: var(--text-primary, #ffffff);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
   border-radius: 4px;
   font-size: 13px;
-  margin-top: 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .setting-item input:focus,
 .setting-item select:focus {
   border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.25);
   outline: none;
 }
 
-.setting-item input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
+.setting-item input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.setting-item select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238a8a8a' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
   cursor: pointer;
-  accent-color: var(--accent-blue);
+}
+
+.setting-item select option {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+/* Custom Checkbox Style */
+.setting-item input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.15s;
+}
+
+.setting-item input[type="checkbox"]:hover {
+  border-color: var(--accent-blue);
+}
+
+.setting-item input[type="checkbox"]:checked {
+  background-color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.setting-item input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.setting-item input[type="checkbox"]:focus {
+  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.25);
+  outline: none;
 }
 
 /* 확장 목록 */
@@ -303,4 +357,73 @@
 
 .settings-content::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
+}
+
+/* ========== Key Bindings / Shortcuts ========== */
+.shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+  gap: 16px;
+}
+
+.shortcut-item:last-child {
+  border-bottom: none;
+}
+
+.shortcut-description {
+  flex: 1;
+}
+
+.shortcut-key {
+  padding: 6px 14px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 100px;
+  text-align: center;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: monospace;
+  transition: all 0.15s;
+}
+
+.shortcut-key:hover {
+  border-color: var(--accent-blue);
+}
+
+.shortcut-key.editing {
+  background-color: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.25);
+}
+
+.shortcut-key:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.25);
+}
+
+.shortcut-reset-btn {
+  margin-left: 8px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  transition: color 0.15s;
+}
+
+.shortcut-reset-btn:hover {
+  color: var(--accent-blue);
 }
