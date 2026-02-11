@@ -1,6 +1,6 @@
 # Gluon - AI 기반 IDE (Quark 연동)
 
-> **AI 통합 모던 개발 환경** (Electron + React + Quark Backend)
+> **AI 통합 모던 개발 환경** 
 
 Gluon은 **로컬 LLM 엔진**과 완벽하게 통합된 차세대 IDE입니다. VS Code 수준의 사용자 경험을 제공하며 실시간 AI 채팅, 코드 분석, 스마트 터미널 통합 등 강력한 AI 기능을 지원합니다.
 
