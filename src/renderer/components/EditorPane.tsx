@@ -65,39 +65,26 @@ function EditorPane({
 
     return (
         <div className="editor-pane" style={containerStyle} onClick={onFocus} onFocus={onFocus} tabIndex={-1}>
-            {files.length > 0 ? (
-                <CodeEditor
-                    openFiles={files}
-                    activeFileIndex={activeIndex}
-                    onFileSelect={onFileSelect}
-                    onContentChange={onContentChange}
-                    onCloseTab={onCloseTab}
-                    onCloseOthers={onCloseOthers}
-                    onCloseToRight={onCloseToRight}
-                    onCloseAll={onCloseAll}
-                    onSave={onSave}
-                    settings={settings}
-                    onReorderTabs={onReorderTabs}
-                    onDiagnosticsChange={onDiagnosticsChange}
-                    workspaceDir={workspaceDir}
-                    onMoveToOtherGroup={onMoveToOtherGroup}
-                    moveDirection={moveDirection}
-                    isSplitView={isSplitView}
-                    onToggleSplit={onToggleSplit}
-                    isActive={isActive}
-                />
-            ) : (
-                <div className="empty-pane" style={{
-                    flex: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--text-secondary)',
-                    background: 'var(--bg-primary)'
-                }}>
-                    <p style={{ fontSize: '13px', opacity: 0.5 }}>No file is open</p>
-                </div>
-            )}
+            <CodeEditor
+                openFiles={files}
+                activeFileIndex={activeIndex}
+                onFileSelect={onFileSelect}
+                onContentChange={onContentChange}
+                onCloseTab={onCloseTab}
+                onCloseOthers={onCloseOthers}
+                onCloseToRight={onCloseToRight}
+                onCloseAll={onCloseAll}
+                onSave={onSave}
+                settings={settings}
+                onReorderTabs={onReorderTabs}
+                onDiagnosticsChange={onDiagnosticsChange}
+                workspaceDir={workspaceDir}
+                onMoveToOtherGroup={onMoveToOtherGroup}
+                moveDirection={moveDirection}
+                isSplitView={isSplitView}
+                onToggleSplit={onToggleSplit}
+                isActive={isActive}
+            />
         </div>
     );
 }

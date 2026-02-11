@@ -383,7 +383,7 @@ function App() {
     }
   };
 
-  // Git 변경 파일 클릭 시 (Diff 보기)
+  // Git 변경 파일 클릭 시 (Diff 보기) - 자동 스플릿
   const handleGitFileClick = async (filePath: string) => {
     if (!workspaceDir) return;
 
@@ -396,8 +396,8 @@ function App() {
       const modifiedResult = await window.electron.fs.readFile(`${workspaceDir}/${filePath}`);
       const modifiedContent = modifiedResult.success ? modifiedResult.content : '';
 
-      // 3. Diff Editor 열기
-      const newFile: OpenFile = {
+      // 3. Diff Editor 열기 (자동 스플릿)
+      const diffFile: OpenFile = {
         path: filePath,
         content: modifiedContent || '',
         isDirty: false,
@@ -406,27 +406,45 @@ function App() {
         modifiedContent: modifiedContent || ''
       };
 
-      // 이미 열려있는지 확인 (Diff 모드로)
-      const existingIndex = openFiles.findIndex(f => f.path === filePath && f.isDiff);
+      // 원본 파일도 준비
+      const originalFile: OpenFile = {
+        path: filePath,
+        content: modifiedContent || '',
+        isDirty: false
+      };
 
-      if (existingIndex !== -1) {
+      // 이미 secondary에 diff로 열려있는지 확인
+      const existingDiffIndex = secondaryFiles.findIndex(f => f.path === filePath && f.isDiff);
+
+      if (existingDiffIndex !== -1) {
         // 이미 열려있으면 업데이트
-        const updatedFiles = [...openFiles];
-        updatedFiles[existingIndex] = newFile;
-        setOpenFiles(updatedFiles);
-        setActiveFileIndex(existingIndex);
+        const updatedFiles = [...secondaryFiles];
+        updatedFiles[existingDiffIndex] = diffFile;
+        setSecondaryFiles(updatedFiles);
+        setSecondaryActiveIndex(existingDiffIndex);
       } else {
-        // 새로 열기
-        // Always open diff in primary group for now? Or active group?
-        // Let's open in active group.
-        if (activeGroup === 'primary') {
-          setPrimaryFiles([...primaryFiles, newFile]);
-          setPrimaryActiveIndex(primaryFiles.length);
-        } else {
-          setSecondaryFiles([...secondaryFiles, newFile]);
-          setSecondaryActiveIndex(secondaryFiles.length);
+        // 새로 열기: secondary에 diff 추가
+        setSecondaryFiles(prev => [...prev, diffFile]);
+        setSecondaryActiveIndex(secondaryFiles.length);
+      }
+
+      // Primary에 원본 파일이 없으면 열기
+      const existingPrimaryIndex = primaryFiles.findIndex(f => f.path === filePath && !f.isDiff);
+      if (existingPrimaryIndex !== -1) {
+        setPrimaryActiveIndex(existingPrimaryIndex);
+      } else {
+        setPrimaryFiles(prev => [...prev, originalFile]);
+        setPrimaryActiveIndex(primaryFiles.length);
+      }
+
+      // 자동 스플릿 활성화
+      if (!isSplitView) {
+        setIsSplitView(true);
+        if (editorSplitRatio < 0.1 || editorSplitRatio > 0.9) {
+          setEditorSplitRatio(0.5);
         }
       }
+      setActiveGroup('secondary');
     } catch (error) {
       console.error('Failed to open diff:', error);
       setAlertMessage('Failed to open diff view');
@@ -1520,6 +1538,27 @@ function App() {
     });
   };
 
+  // Auto-close split view when either pane becomes empty
+  useEffect(() => {
+    if (!isSplitView) return;
+    if (primaryFiles.length === 0 && secondaryFiles.length === 0) {
+      // Both empty: just close split
+      setIsSplitView(false);
+      setActiveGroup('primary');
+    } else if (secondaryFiles.length === 0) {
+      // Secondary empty: close split, keep primary
+      setIsSplitView(false);
+      setActiveGroup('primary');
+    } else if (primaryFiles.length === 0) {
+      // Primary empty: move secondary files to primary, close split
+      setPrimaryFiles(secondaryFiles);
+      setPrimaryActiveIndex(secondaryActiveIndex);
+      setSecondaryFiles([]);
+      setSecondaryActiveIndex(0);
+      setIsSplitView(false);
+      setActiveGroup('primary');
+    }
+  }, [isSplitView, primaryFiles.length, secondaryFiles.length]);
 
   // 파일 열기 핸들러
   const handleOpenFileDialog = async () => {
