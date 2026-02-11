@@ -1,15 +1,22 @@
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
 
 # Build output
 dist/
 release/
 
-# Environment
 .env
 .env.local
+
+# Testing
+test-*.js
+test.txt
+
+# Python
+.ruff_cache/
+__pycache__/
+*.pyc
 
 # IDE
 .vscode/

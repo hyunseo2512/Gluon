@@ -1,0 +1,501 @@
+import { useState, useEffect } from 'react';
+import { XIcon, SettingsIcon } from './Icons';
+import { KeyBinding, DEFAULT_SHORTCUTS } from '../types/shortcuts';
+import { EditorSettings, DEFAULT_EDITOR_SETTINGS } from '../types/settings';
+import '../styles/SettingsPanel.css';
+
+interface SettingsPanelProps {
+  onClose: () => void;
+  onOpenSettingsJson?: (filePath: string) => void;
+}
+
+
+import { useAuthStore } from '../store/authStore';
+
+type SettingsTab = 'editor' | 'github' | 'shortcuts' | 'members';
+
+interface User {
+  id: number;
+  email: string;
+  username: string;
+  full_name: string;
+  role: string;
+  created_at: string;
+}
+
+function SettingsPanel({ onClose, onOpenSettingsJson }: SettingsPanelProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('editor');
+  const [editorSettings, setEditorSettings] = useState<EditorSettings>(DEFAULT_EDITOR_SETTINGS);
+  token: ''
+});
+
+const { user, token, backendUrl } = useAuthStore();
+const [users, setUsers] = useState<User[]>([]);
+const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+
+const [shortcuts, setShortcuts] = useState<KeyBinding[]>(DEFAULT_SHORTCUTS);
+const [editingId, setEditingId] = useState<string | null>(null);
+const [isInitialLoad, setIsInitialLoad] = useState(true);
+const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+useEffect(() => {
+  const loadSettings = async () => {
+    // settings.json에서 에디터 설정 읽기
+    try {
+      const result = await window.electron.settings.read();
+      if (result.success && result.data) {
+        const jsonSettings = result.data as Record<string, unknown>;
+        const settings: Partial<EditorSettings> = {};
+        if (jsonSettings['editor.fontSize'] !== undefined) settings.fontSize = jsonSettings['editor.fontSize'] as number;
+        if (jsonSettings['editor.fontFamily'] !== undefined) settings.fontFamily = jsonSettings['editor.fontFamily'] as string;
+        if (jsonSettings['editor.fontLigatures'] !== undefined) settings.fontLigatures = jsonSettings['editor.fontLigatures'] as boolean;
+        if (jsonSettings['editor.tabSize'] !== undefined) settings.tabSize = jsonSettings['editor.tabSize'] as number;
+        if (jsonSettings['editor.insertSpaces'] !== undefined) settings.insertSpaces = jsonSettings['editor.insertSpaces'] as boolean;
+        if (jsonSettings['editor.wordWrap'] !== undefined) settings.wordWrap = jsonSettings['editor.wordWrap'] as boolean;
+        if (jsonSettings['editor.minimap'] !== undefined) settings.minimap = jsonSettings['editor.minimap'] as boolean;
+        if (jsonSettings['editor.lineNumbers'] !== undefined) settings.lineNumbers = jsonSettings['editor.lineNumbers'] as boolean;
+        if (jsonSettings['editor.formatOnSave'] !== undefined) settings.formatOnSave = jsonSettings['editor.formatOnSave'] as boolean;
+        if (jsonSettings['editor.theme'] !== undefined) settings.theme = jsonSettings['editor.theme'] as string;
+        if (jsonSettings['editor.defaultFormatter'] !== undefined) settings.defaultFormatter = jsonSettings['editor.defaultFormatter'] as string;
+        setEditorSettings({ ...DEFAULT_EDITOR_SETTINGS, ...settings });
+      }
+    } catch (e) {
+      console.error('Failed to load settings.json:', e);
+    }
+
+    const user = await window.electron.store.get('github_username');
+    const token = await window.electron.store.get('github_token');
+
+    const savedShortcuts = await window.electron.store.get('key_bindings');
+
+    setGithubSettings({
+      username: user.success && user.value ? String(user.value) : '',
+      token: token.success && token.value ? String(token.value) : ''
+    });
+
+
+
+    if (savedShortcuts.success && Array.isArray(savedShortcuts.value)) {
+      const merged = DEFAULT_SHORTCUTS.map(def => {
+        const saved = (savedShortcuts.value as KeyBinding[]).find((s: KeyBinding) => s.id === def.id);
+        return saved ? { ...def, currentKey: saved.currentKey } : def;
+      });
+      setShortcuts(merged);
+    }
+
+    // 초기 로딩 완료 - 이제 저장 허용
+    setIsInitialLoad(false);
+  };
+  loadSettings();
+}, []);
+
+// settings.json에 저장 (초기 로딩 시 건너뛰기)
+useEffect(() => {
+  if (isInitialLoad) return; // 초기 로딩 시 저장 안함
+
+  const jsonSettings = {
+    'editor.fontSize': editorSettings.fontSize,
+    'editor.fontFamily': editorSettings.fontFamily,
+    'editor.fontLigatures': editorSettings.fontLigatures,
+    'editor.tabSize': editorSettings.tabSize,
+    'editor.insertSpaces': editorSettings.insertSpaces,
+    'editor.wordWrap': editorSettings.wordWrap,
+    'editor.minimap': editorSettings.minimap,
+    'editor.lineNumbers': editorSettings.lineNumbers,
+    'editor.theme': editorSettings.theme,
+    'editor.formatOnSave': editorSettings.formatOnSave,
+    'editor.defaultFormatter': editorSettings.defaultFormatter,
+  };
+  window.electron.settings.write(jsonSettings);
+}, [editorSettings, isInitialLoad]);
+
+useEffect(() => {
+  window.electron.store.set('key_bindings', shortcuts);
+}, [shortcuts]);
+
+const handleEditorSettingChange = (key: keyof EditorSettings, value: any) => {
+  setEditorSettings((prevSettings) => ({
+    ...prevSettings,
+    [key]: value,
+  }));
+};
+
+const handleKeyDown = (e: React.KeyboardEvent, id: string) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const modifiers = [];
+  if (e.ctrlKey) modifiers.push('Ctrl');
+  if (e.altKey) modifiers.push('Alt');
+  if (e.shiftKey) modifiers.push('Shift');
+  if (e.metaKey) modifiers.push('Meta');
+
+  let key = e.key;
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) return;
+
+  if (key === ' ') key = 'Space';
+  else if (key.length === 1) key = key.toUpperCase();
+
+  const combo = [...modifiers, key].join('+');
+
+  setShortcuts(prev => prev.map(s => s.id === id ? { ...s, currentKey: combo } : s));
+  setEditingId(null);
+};
+
+const showToast = (msg: string) => {
+  setToastMessage(msg);
+  setTimeout(() => setToastMessage(null), 2500);
+};
+
+showToast('GitHub 설정이 저장되었습니다.');
+  };
+
+const fetchUsers = async () => {
+  if (!token || !backendUrl) return;
+  setIsLoadingUsers(true);
+  try {
+    const response = await fetch(`${backendUrl}/users`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      setUsers(data.users);
+    } else {
+      console.error('Failed to fetch users');
+    }
+  } catch (e) {
+    console.error('Error fetching users:', e);
+  } finally {
+    setIsLoadingUsers(false);
+  }
+};
+
+const handleRoleChange = async (email: string, newRole: string) => {
+  if (!token || !backendUrl) return;
+  try {
+    const response = await fetch(`${backendUrl}/users/${email}/role`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ role: newRole })
+    });
+
+    if (response.ok) {
+      setUsers(prev => prev.map(u => u.email === email ? { ...u, role: newRole } : u));
+      showToast(`Role updated to ${newRole}`);
+    } else {
+      showToast('Failed to update role');
+    }
+  } catch (e) {
+    showToast('Error updating role');
+  }
+};
+
+useEffect(() => {
+  if (activeTab === 'members' && user?.role === 'root') {
+    fetchUsers();
+  }
+}, [activeTab, user]);
+
+return (
+  <div className="settings-panel" onClick={onClose}>
+    <div className="settings-panel-content" onClick={(e) => e.stopPropagation()}>
+      {/* 헤더 */}
+      <div className="settings-header">
+        <div className="settings-title">
+          <SettingsIcon size={16} />
+          <h2>Settings</h2>
+        </div>
+        <button className="settings-close" onClick={onClose}>
+          <XIcon size={16} />
+        </button>
+      </div>
+
+      {/* 탭 메뉴 */}
+      <div className="settings-tabs">
+        <button
+          className={`settings-tab ${activeTab === 'editor' ? 'active' : ''}`}
+          onClick={() => setActiveTab('editor')}
+        >
+          Editor
+        </button>
+        <button
+          className={`settings-tab ${activeTab === 'github' ? 'active' : ''}`}
+          onClick={() => setActiveTab('github')}
+        >
+          GitHub
+        </button>
+
+        <button
+          className={`settings-tab ${activeTab === 'shortcuts' ? 'active' : ''}`}
+          onClick={() => setActiveTab('shortcuts')}
+        >
+          Key Bindings
+        </button>
+
+        {user?.role === 'root' && (
+          <button
+            className={`settings-tab ${activeTab === 'members' ? 'active' : ''}`}
+            onClick={() => setActiveTab('members')}
+          >
+            Members
+          </button>
+        )}
+      </div>
+
+      {/* 콘텐츠 */}
+      <div className="settings-content">
+        {activeTab === 'shortcuts' && (
+          <div className="settings-section">
+            <h3>Key Bindings</h3>
+            <div className="shortcuts-list">
+              {shortcuts.map((shortcut) => (
+                <div key={shortcut.id} className="shortcut-item">
+                  <div className="shortcut-description">
+                    <span className="setting-label">{shortcut.description}</span>
+                  </div>
+                  <div
+                    className={`shortcut-key ${editingId === shortcut.id ? 'editing' : ''}`}
+                    onClick={() => setEditingId(shortcut.id)}
+                    onKeyDown={(e) => editingId === shortcut.id && handleKeyDown(e, shortcut.id)}
+                    tabIndex={0}
+                  >
+                    {editingId === shortcut.id ? 'Press keys...' : shortcut.currentKey}
+                  </div>
+                  {shortcut.currentKey !== shortcut.defaultKey && (
+                    <button
+                      className="shortcut-reset-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShortcuts(prev => prev.map(s => s.id === shortcut.id ? { ...s, currentKey: s.defaultKey } : s));
+                      }}
+                      title="Reset to default"
+                    >
+                      ↺
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                className="shortcut-reset-all-btn"
+                onClick={() => {
+                  setShortcuts(DEFAULT_SHORTCUTS.map(s => ({ ...s })));
+                }}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  color: 'var(--text-secondary)',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseOver={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.borderColor = 'var(--accent-blue)'; }}
+                onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--border-color)'; }}
+              >
+                Reset All to Defaults
+              </button>
+            </div>
+          </div>
+        )}
+
+
+        {activeTab === 'editor' && (
+          <div className="settings-section">
+            <h3>Editor Settings</h3>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Font Size</span>
+              </label>
+              <input
+                type="number"
+                min="10"
+                max="30"
+                value={editorSettings.fontSize}
+                onChange={(e) => handleEditorSettingChange('fontSize', parseInt(e.target.value))}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Tab Size</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="8"
+                value={editorSettings.tabSize}
+                onChange={(e) => handleEditorSettingChange('tabSize', parseInt(e.target.value))}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Insert Spaces</span>
+              </label>
+              <input
+                type="checkbox"
+                checked={editorSettings.insertSpaces}
+                onChange={(e) => handleEditorSettingChange('insertSpaces', e.target.checked)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Word Wrap</span>
+              </label>
+              <input
+                type="checkbox"
+                checked={editorSettings.wordWrap}
+                onChange={(e) => handleEditorSettingChange('wordWrap', e.target.checked)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Minimap</span>
+              </label>
+              <input
+                type="checkbox"
+                checked={editorSettings.minimap}
+                onChange={(e) => handleEditorSettingChange('minimap', e.target.checked)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Line Numbers</span>
+              </label>
+              <input
+                type="checkbox"
+                checked={editorSettings.lineNumbers}
+                onChange={(e) => handleEditorSettingChange('lineNumbers', e.target.checked)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Theme</span>
+              </label>
+              <select
+                value={editorSettings.theme}
+                onChange={(e) => handleEditorSettingChange('theme', e.target.value)}
+              >
+                <option value="gluon">Gluon</option>
+              </select>
+            </div>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Format On Save</span>
+              </label>
+              <input
+                type="checkbox"
+                checked={editorSettings.formatOnSave}
+                onChange={(e) => handleEditorSettingChange('formatOnSave', e.target.checked)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Default Formatter</span>
+              </label>
+              <select
+                value={editorSettings.defaultFormatter}
+                onChange={(e) => handleEditorSettingChange('defaultFormatter', e.target.value)}
+              >
+                <option value="none">None</option>
+              </select>
+            </div>
+
+            {/* Divider */}
+            <div className="setting-divider" style={{ margin: '20px 0', borderBottom: '1px solid var(--border-color)' }}></div>
+
+            {/* Open Settings JSON Button */}
+            <div className="setting-item" style={{ justifyContent: 'flex-start' }}>
+              <button
+                className="save-button"
+                style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}
+                onClick={async () => {
+                  if (onOpenSettingsJson) {
+                    const settingsPath = await window.electron.settings.getPath();
+                    onOpenSettingsJson(settingsPath);
+                    onClose();
+                  }
+                }}
+              >
+                Open Settings (JSON)
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'github' && (
+          <div className="settings-section">
+            <h3>GitHub Integration</h3>
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Username</span>
+              </label>
+              <input
+                type="text"
+                value={githubSettings.username || ''}
+                onChange={(e) => setGithubSettings({ ...githubSettings, username: e.target.value })}
+                placeholder="GitHub Username"
+              />
+            </div>
+            <div className="setting-item">
+              <label>
+                <span className="setting-label">Personal Access Token</span>
+              </label>
+              <input
+                type="password"
+                value={githubSettings.token || ''}
+                onChange={(e) => setGithubSettings({ ...githubSettings, token: e.target.value })}
+                placeholder="ghp_xxxxxxxxxxxx"
+                className="input-password"
+              />
+            </div>
+            <div className="setting-actions">
+              <button className="save-button" onClick={handleGithubSave}>Save Configuration</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Gluon 테마 토스트 알림 */}
+      {toastMessage && (
+        <div style={{
+          position: 'absolute',
+          bottom: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+          color: '#e0e0e0',
+          padding: '10px 24px',
+          borderRadius: '8px',
+          fontSize: '13px',
+          fontWeight: 500,
+          border: '1px solid rgba(187, 134, 252, 0.3)',
+          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
+          zIndex: 9999,
+          animation: 'fadeIn 0.2s ease',
+          whiteSpace: 'nowrap',
+        }}>
+          ✓ {toastMessage}
+        </div>
+      )}
+    </div>
+  </div >
+);
+}
+
+export default SettingsPanel;

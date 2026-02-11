@@ -52,12 +52,15 @@
     "@typescript-eslint/eslint-plugin": "^6.20.0",
     "@typescript-eslint/parser": "^6.20.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.24",
     "concurrently": "^8.2.2",
-    "electron": "^28.2.0",
+    "electron": "^28.3.3",
     "electron-builder": "^24.9.1",
     "eslint": "^8.56.0",
     "eslint-plugin-react": "^7.33.2",
+    "postcss": "^8.5.6",
     "prettier": "^3.2.4",
+    "tailwindcss": "^4.1.18",
     "typescript": "^5.3.3",
     "vite": "^5.0.12",
     "vite-plugin-monaco-editor": "^1.1.0"
@@ -69,6 +72,7 @@
     "directories": {
       "output": "release"
     },
+    "artifactName": "${productName}.${ext}",
     "files": [
       "dist/**/*",
       "public/**/*",
@@ -81,7 +85,11 @@
       }
     ],
     "linux": {
-      "target": "AppImage",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "maintainer": "zxcvne <zxcvne@localhost>",
       "category": "Development",
       "icon": "public/icons/gluon-512.svg",
       "mimeTypes": [
@@ -92,6 +100,9 @@
         "Name": "Gluon",
         "StartupWMClass": "Gluon"
       }
+    },
+    "deb": {
+      "afterInstall": "build/after-install.sh"
     },
     "protocols": [
       {

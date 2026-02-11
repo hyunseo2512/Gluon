@@ -6,6 +6,14 @@ import { linterService } from './services/LinterService';
 // 개발 환경 여부 확인
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
+// 프로덕션 빌드에서 모든 콘솔 출력 숨김
+if (!isDev) {
+  console.log = () => { };
+  console.info = () => { };
+  console.warn = () => { };
+  console.error = () => { };
+}
+
 // [CRITICAL] Self-signed 인증서 에러 무시 (전역 설정)
 // CLI 인자로 넘기는 것보다 여기서 설정하는 것이 가장 확실함.
 app.commandLine.appendSwitch('ignore-certificate-errors');
@@ -52,9 +60,17 @@ function createWindow(): void {
     ? path.join(__dirname, '../../public/icons/gluon-512.svg')
     : path.join(__dirname, '../public/icons/gluon-512.svg');
 
+  // 저장된 윈도우 상태 복원
+  const Store = require('electron-store');
+  const windowStore = new Store({ name: 'window-state' });
+  const savedBounds = windowStore.get('bounds', { width: 1400, height: 900 });
+  const wasMaximized = windowStore.get('maximized', false);
+
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: savedBounds.width,
+    height: savedBounds.height,
+    x: savedBounds.x,
+    y: savedBounds.y,
     minWidth: 800,
     minHeight: 600,
     title: 'Gluon - AI IDE',
@@ -74,8 +90,25 @@ function createWindow(): void {
   // 윈도우 관리 Set에 추가
   windows.add(win);
 
+  // 윈도우 상태 저장 (디바운스)
+  let saveTimeout: NodeJS.Timeout | null = null;
+  const saveWindowState = () => {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+      if (!win.isMaximized() && !win.isMinimized()) {
+        windowStore.set('bounds', win.getBounds());
+      }
+      windowStore.set('maximized', win.isMaximized());
+    }, 300);
+  };
+  win.on('resize', saveWindowState);
+  win.on('move', saveWindowState);
+  win.on('maximize', saveWindowState);
+  win.on('unmaximize', saveWindowState);
+
   // 윈도우가 준비되면 표시
   win.once('ready-to-show', () => {
+    if (wasMaximized) win.maximize();
     win.show();
     // 개발자 도구 (선택적)
     // if (isDev) win.webContents.openDevTools();
@@ -151,6 +184,17 @@ function setupIpcHandlers(): void {
   ipcMain.handle('ssh:connect', async (_event, config) => {
     if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
     try {
+      // privateKeyPath가 있으면 파일을 읽어서 privateKey로 변환
+      if (config.privateKeyPath) {
+        const fs = require('fs');
+        const keyPath = config.privateKeyPath.replace(/^~/, require('os').homedir());
+        if (fs.existsSync(keyPath)) {
+          config.privateKey = fs.readFileSync(keyPath, 'utf8');
+        } else {
+          return { success: false, error: `키 파일을 찾을 수 없습니다: ${keyPath}` };
+        }
+        delete config.privateKeyPath;
+      }
       await sshManager.connect(config);
       return { success: true };
     } catch (err: any) {
@@ -174,11 +218,12 @@ function setupIpcHandlers(): void {
     if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
     try {
       await sshManager.startShell(
+        terminalId,
         (data: string) => {
           event.sender.send('terminal:data', terminalId, data);
         },
-        () => {
-          event.sender.send('terminal:exit', terminalId);
+        (code: number) => {
+          event.sender.send('terminal:exit', terminalId, code);
         }
       );
       return { success: true };
@@ -187,12 +232,31 @@ function setupIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('ssh:write', (_event, data) => {
-    if (sshManager) sshManager.write(data);
+  ipcMain.handle('ssh:exec-shell', async (event, terminalId: string, command: string) => {
+    if (!sshManager) return { success: false, error: 'SSHManager not loaded' };
+    try {
+      await sshManager.startShellWithCommand(
+        terminalId,
+        command,
+        (data: string) => {
+          event.sender.send('terminal:data', terminalId, data);
+        },
+        (code: number) => {
+          event.sender.send('terminal:exit', terminalId, code);
+        }
+      );
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
   });
 
-  ipcMain.handle('ssh:resize', (_event, cols, rows) => {
-    if (sshManager) sshManager.resize(cols, rows);
+  ipcMain.handle('ssh:write', (_event, terminalId, data) => {
+    if (sshManager) sshManager.write(terminalId, data);
+  });
+
+  ipcMain.handle('ssh:resize', (_event, terminalId, cols, rows) => {
+    if (sshManager) sshManager.resize(terminalId, cols, rows);
   });
 
   // ========== SFTP Handlers ==========
@@ -284,6 +348,11 @@ function setupIpcHandlers(): void {
   });
 
 
+  // 홈 디렉토리 경로 반환 (인앱 파일 브라우저용)
+  ipcMain.handle('fs:getHomePath', async () => {
+    return { success: true, path: require('os').homedir() };
+  });
+
   // 디렉토리 읽기
   ipcMain.handle('fs:readDir', async (_event, dirPath: string) => {
     try {
@@ -312,7 +381,7 @@ function setupIpcHandlers(): void {
       }
 
       const watcher = chokidar.watch(dirPath, {
-        ignored: /(^|[\/\\])(\.|node_modules|\.git)/, // 숨김 파일, node_modules, .git 무시
+        ignored: /(^|[\/\\])(\.|node_modules|\.git|venv|\.venv|env|\.env|__pycache__|dist|build|target|out)/, // 대량 파일 및 숨김 파일 무시
         persistent: true,
         ignoreInitial: true, // 초기 스캔 이벤트 무시
         depth: 10, // 최대 깊이
@@ -536,8 +605,48 @@ function setupIpcHandlers(): void {
     }
   });
 
+  // 파일 검색 (Recursive)
+  ipcMain.handle('fs:searchFiles', async (_event, rootPath: string, query: string = '') => {
+    try {
+      const path = require('path');
+      const files: string[] = [];
+      const ignoreDirs = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.idea', '.vscode', 'coverage', '__pycache__']);
+
+      async function walk(currentPath: string) {
+        const entries = await fs.readdir(currentPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            if (!ignoreDirs.has(entry.name) && !entry.name.startsWith('.')) {
+              await walk(path.join(currentPath, entry.name));
+            }
+          } else {
+            // 파일인 경우
+            const fullPath = path.join(currentPath, entry.name);
+            const relativePath = path.relative(rootPath, fullPath);
+
+            // 검색어 필터링 (없으면 모두 포함)
+            if (!query || relativePath.toLowerCase().includes(query.toLowerCase())) {
+              files.push(relativePath);
+            }
+
+            // Limit results for performance
+            if (files.length >= 1000) return;
+          }
+          if (files.length >= 1000) return;
+        }
+      }
+
+      await walk(rootPath);
+      return { success: true, files };
+    } catch (error: any) {
+      console.error('Failed to search files:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // 터미널 시작 (탭별로 고유 ID)
-  ipcMain.handle('terminal:start', (_event, terminalId: string, shellType: string = 'default', cols: number = 80, rows: number = 24, cwd?: string) => {
+  ipcMain.handle('terminal:start', (_event, terminalId: string, shellType: string = 'default', cols: number = 80, rows: number = 24, cwd?: string, initialCommand?: string) => {
     // 이미 해당 ID의 터미널이 있으면 종료
     if (terminals.has(terminalId)) {
       const existingProcess = terminals.get(terminalId);
@@ -567,6 +676,15 @@ function setupIpcHandlers(): void {
         case 'sh':
           shell = '/bin/sh';
           break;
+        case 'tmux':
+          if (require('fs').existsSync('/usr/bin/tmux')) {
+            shell = '/usr/bin/tmux';
+          } else if (require('fs').existsSync('/bin/tmux')) {
+            shell = '/bin/tmux';
+          } else {
+            shell = 'tmux';
+          }
+          break;
         default:
           // 시스템 기본 셸 사용 (zsh 우선 탐색)
           if (process.env.SHELL) {
@@ -585,7 +703,22 @@ function setupIpcHandlers(): void {
 
       console.log(`🚀 Starting PTY terminal ${terminalId} with shell: ${shell}`);
 
-      const ptyProcess = pty.spawn(shell, [], {
+      const args: string[] = [];
+      if (initialCommand && shellType !== 'tmux') {
+        // Debug logging to file
+        try {
+          require('fs').appendFileSync('/tmp/gluon_debug.log', `[${new Date().toISOString()}] terminal:start id=${terminalId} cmd=${initialCommand}\n`);
+        } catch (e) { /* ignore */ }
+
+        // Execute command and exit (no interactive shell)
+        // User requested output-only mode
+        args.push('-c', initialCommand);
+      } else if (shellType === 'tmux') {
+        // Create or attach to session
+        args.push('new-session', '-A', '-s', 'gluon-session');
+      }
+
+      const ptyProcess = pty.spawn(shell, args, {
         name: 'xterm-256color',
         cols,
         rows,
@@ -633,6 +766,29 @@ function setupIpcHandlers(): void {
       }
     }
     return { success: false, error: 'Terminal not found' };
+  });
+
+  // 시스템 기본 쉘 가져오기
+  ipcMain.handle('terminal:getSystemShell', () => {
+    try {
+      let shell: string;
+      if (process.env.SHELL) {
+        shell = process.env.SHELL;
+      } else {
+        const fs = require('fs');
+        if (fs.existsSync('/bin/zsh')) {
+          shell = '/bin/zsh';
+        } else if (fs.existsSync('/usr/bin/zsh')) {
+          shell = '/usr/bin/zsh';
+        } else {
+          shell = '/bin/bash';
+        }
+      }
+      return { success: true, shell };
+    } catch (error: any) {
+      console.error('Failed to get system shell:', error);
+      return { success: false, error: error.message };
+    }
   });
 
   // 터미널에 데이터 쓰기 (터미널 ID 포함)
@@ -721,14 +877,15 @@ function setupIpcHandlers(): void {
   // 기본 설정 (초기 파일 생성 시 사용)
   const defaultSettings = {
     "editor.fontSize": 14,
-    "editor.fontFamily": "'Fira Code', 'Consolas', monospace",
     "editor.fontLigatures": true,
     "editor.tabSize": 2,
     "editor.insertSpaces": true,
     "editor.wordWrap": false,
     "editor.minimap": false,
     "editor.lineNumbers": true,
-    "editor.formatOnSave": false
+    "editor.fontFamily": "'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace",
+    "editor.formatOnSave": false,
+    "terminal.integrated.scrollback": 1000
   };
 
   // settings.json 경로 반환
@@ -752,9 +909,35 @@ function setupIpcHandlers(): void {
       }
       if (!fsSync.existsSync(settingsPath)) {
         fsSync.writeFileSync(settingsPath, JSON.stringify(defaultSettings, null, 2), 'utf8');
+        return { success: true, data: defaultSettings };
       }
+
       const content = fsSync.readFileSync(settingsPath, 'utf8');
-      return { success: true, data: JSON.parse(content) };
+      let currentSettings = {};
+      try {
+        currentSettings = JSON.parse(content);
+      } catch (e) {
+        console.error('Failed to parse settings.json, reverting to defaults', e);
+        currentSettings = {};
+      }
+
+      // Merge defaults: if key missing in currentSettings, add it from defaultSettings
+      let hasChanges = false;
+      const mergedSettings: Record<string, any> = { ...currentSettings };
+
+      for (const [key, value] of Object.entries(defaultSettings)) {
+        if (mergedSettings[key] === undefined) {
+          mergedSettings[key] = value;
+          hasChanges = true;
+        }
+      }
+
+      // If we added missing defaults, save back to file so user sees them
+      if (hasChanges) {
+        fsSync.writeFileSync(settingsPath, JSON.stringify(mergedSettings, null, 2), 'utf8');
+      }
+
+      return { success: true, data: mergedSettings };
     } catch (error: any) {
       console.error('Failed to read settings.json:', error);
       return { success: false, error: error.message };
@@ -920,6 +1103,17 @@ function setupIpcHandlers(): void {
   // ----------------------------------------------------------------------
   ipcMain.handle('python:get-version', async () => {
     return await pythonService.getVersion();
+  });
+
+  // Environment Service
+  ipcMain.handle('env:scan-python', async (_, projectRoot: string) => {
+    const { environmentService } = await import('./services/EnvironmentService');
+    try {
+      return await environmentService.scanPython(projectRoot);
+    } catch (e) {
+      console.error('env:scan-python failed:', e);
+      return [];
+    }
   });
 
   ipcMain.handle('python:run', async (_, script: string) => {
@@ -1253,9 +1447,15 @@ ipcMain.handle('chat:stream-start', async (event, streamId: string, url: string,
     const stream = response.data;
     activeStreams.set(streamId, stream);
 
+    const { StringDecoder } = require('string_decoder');
+    const utf8Decoder = new StringDecoder('utf8');
+
     stream.on('data', (chunk: Buffer) => {
-      // Convert buffer to string
-      event.sender.send('chat:stream-data', streamId, chunk.toString('utf-8'));
+      // StringDecoder handles multi-byte UTF-8 chars split across chunks
+      const text = utf8Decoder.write(chunk);
+      if (text) {
+        event.sender.send('chat:stream-data', streamId, text);
+      }
     });
 
     stream.on('end', () => {
@@ -1313,6 +1513,111 @@ ipcMain.handle('auth:verify', async (_event, token: string, backendUrl: string) 
     console.error('Auth verification failed in Main:', error.message);
     const status = error.response ? error.response.status : null;
     return { success: false, error: error.message, status };
+  }
+});
+
+// --- Auth Login Handler (IPC Proxy) ---
+ipcMain.handle('auth:login', async (_event, backendUrl: string, username: string, password: string) => {
+  const axios = require('axios');
+  try {
+    console.log(`🔑 Login attempt to: ${backendUrl}`);
+    const response = await axios.post(`${backendUrl}/auth/token`,
+      new URLSearchParams({ username, password }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 5000 }
+    );
+    return { success: true, data: response.data };
+  } catch (error: any) {
+    console.error('Login failed in Main:', error.message);
+    const detail = error.response?.data?.detail || error.message;
+    return { success: false, error: detail, status: error.response?.status };
+  }
+});
+
+// --- Auth Register Handler (IPC Proxy) ---
+ipcMain.handle('auth:register', async (_event, backendUrl: string, email: string, password: string, fullName: string) => {
+  const axios = require('axios');
+  try {
+    console.log(`📝 Register attempt to: ${backendUrl}`);
+    const response = await axios.post(`${backendUrl}/auth/register`,
+      { email, password, full_name: fullName },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 5000 }
+    );
+    return { success: true, data: response.data };
+  } catch (error: any) {
+    console.error('Register failed in Main:', error.message);
+    const detail = error.response?.data?.detail || error.message;
+    return { success: false, error: detail, status: error.response?.status };
+  }
+});
+
+// --- Member Management Handlers (IPC Proxy) ---
+ipcMain.handle('auth:getUsers', async (_event, backendUrl: string, token: string) => {
+  const axios = require('axios');
+  const https = require('https');
+  try {
+    const agent = new https.Agent({
+      rejectUnauthorized: false,
+      keepAlive: true
+    });
+
+    console.log(`👥 Fetching users from: ${backendUrl}`);
+    const response = await axios.get(`${backendUrl}/users`, {
+      headers: { Authorization: `Bearer ${token}` },
+      httpsAgent: agent,
+      timeout: 5000
+    });
+    return { success: true, data: response.data };
+  } catch (error: any) {
+    console.error('Fetch users failed in Main:', error.message);
+    const detail = error.response?.data?.detail || error.message;
+    return { success: false, error: detail, status: error.response?.status };
+  }
+});
+
+ipcMain.handle('auth:updateUserRole', async (_event, backendUrl: string, token: string, email: string, role: string) => {
+  const axios = require('axios');
+  const https = require('https');
+  try {
+    const agent = new https.Agent({
+      rejectUnauthorized: false
+    });
+
+    console.log(`👑 Updating role for ${email} to ${role}`);
+    const response = await axios.put(`${backendUrl}/users/${email}/role`,
+      { role },
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        httpsAgent: agent,
+        timeout: 5000
+      }
+    );
+    return { success: true, data: response.data };
+  } catch (error: any) {
+    console.error('Update role failed in Main:', error.message);
+    const detail = error.response?.data?.detail || error.message;
+    return { success: false, error: detail, status: error.response?.status };
+  }
+});
+
+ipcMain.handle('auth:deleteUser', async (_event, backendUrl: string, token: string, email: string) => {
+  const axios = require('axios');
+  const https = require('https');
+  try {
+    const agent = new https.Agent({
+      rejectUnauthorized: false
+    });
+
+    console.log(`❌ Deleting user ${email} at ${backendUrl}`);
+    const response = await axios.delete(`${backendUrl}/users/${email}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      httpsAgent: agent,
+      timeout: 5000
+    });
+    return { success: true, data: response.data };
+  } catch (error: any) {
+    console.error('Delete user failed in Main:', error.message);
+    const detail = error.response?.data?.detail || error.message;
+    return { success: false, error: detail, status: error.response?.status };
   }
 });
 

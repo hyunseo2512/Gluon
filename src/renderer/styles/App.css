@@ -538,6 +538,18 @@
 }
 
 /* 프로필 드롭다운 */
+.profile-icon.root-profile-anim {
+  background: linear-gradient(135deg,
+      #ffffff 0%,
+      #BB86FC 25%,
+      #00BFFF 50%,
+      #BB86FC 75%,
+      #ffffff 100%);
+  background-size: 400% 400%;
+  animation: diagonal-flow 3s linear infinite;
+  box-shadow: 0 0 8px rgba(187, 134, 252, 0.6);
+}
+
 .profile-dropdown-menu {
   position: absolute;
   top: 30px;
@@ -727,4 +739,28 @@
 .monaco-menu .action-item:hover .keybinding,
 .monaco-menu .action-item.focused .keybinding {
   color: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* 레이아웃 토글 버튼 */
+.layout-button {
+  background: none;
+  border: none;
+  color: #858585;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.layout-button:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.layout-button.active {
+  color: #d1d5db;
+  background-color: transparent;
 }

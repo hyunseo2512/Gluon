@@ -1,15 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
+import { useAuthStore } from '../store/authStore';
+import { OpenFile } from '../types/file';
 import Editor, { DiffEditor, useMonaco, loader } from '@monaco-editor/react';
 import '../styles/CodeEditor.css';
-import { getIconForFile, ChevronLeftIcon, ChevronRightIcon } from './Icons';
+import { getIconForFile, ChevronLeftIcon, ChevronRightIcon, SplitIcon, SingleIcon } from './Icons';
 import MarkdownPreview from './MarkdownPreview';
 import { gluonQuantumTheme } from '../themes/gluonQuantum';
 import { gluonCarbonTheme } from '../themes/gluonCarbon';
 import { gluonMarkdownTheme } from '../themes/gluonMarkdown';
+import { gluonNeonTheme } from '../themes/gluonNeon';
+import { gluonJavaTheme } from '../themes/gluonJava';
+import * as monacoEditor from 'monaco-editor';
 import { emmetHTML, emmetCSS, emmetJSX } from 'emmet-monaco-es';
 
 // Initialize Monaco Globally (Theme & Compiler Options)
-loader.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+// Use local node_modules/monaco-editor bundle (no CDN dependency)
+loader.config({ monaco: monacoEditor });
 
 loader.init().then((monaco) => {
   // Initialize Emmet for HTML, CSS, JSX
@@ -44,25 +50,163 @@ loader.init().then((monaco) => {
   // 3. Gluon Markdown (Markdown Specific)
   monaco.editor.defineTheme('gluon-markdown', gluonMarkdownTheme);
 
-  // 4. Gluon Classic (VS Dark + Gluon Background)
+  // 4. Gluon Neon (JS/TS/React)
+  monaco.editor.defineTheme('gluon-neon', gluonNeonTheme);
+
+  // 5. Gluon Java (Java Exclusive)
+  monaco.editor.defineTheme('gluon-java', gluonJavaTheme);
+
+  // 6. Gluon Classic (VS Dark + Gluon Background)
   monaco.editor.defineTheme('gluon-classic', {
     base: 'vs-dark',
     inherit: true,
     rules: [], // Inherit standard VS Dark highlighting
     colors: gluonQuantumTheme.colors // Use same Deep Space background
   });
+
+  // ─── Custom Semantic Token Provider for JS/TS ───
+  // Monaco's Monarch tokenizer treats `console`, `log` etc. as plain identifiers.
+  // This provider scans code for known built-in globals and method calls,
+  // emitting semantic tokens so the theme can color them distinctly.
+  const BUILTIN_GLOBALS_RE = /\b(console|window|document|Math|JSON|Object|Array|Promise|Map|Set|Date|Error|RegExp|Number|String|Boolean|Symbol|parseInt|parseFloat|isNaN|isFinite|setTimeout|setInterval|clearTimeout|clearInterval|fetch|require|module|process|global|globalThis|Buffer|exports|navigator|location|history|localStorage|sessionStorage|performance|crypto|Intl|Proxy|Reflect|WeakMap|WeakSet|undefined|NaN|Infinity|alert|confirm|prompt|atob|btoa)\b/g;
+  const METHOD_CALL_RE = /\.(\w+)\s*\(/g;
+
+  const semanticLegend = {
+    tokenTypes: ['variable', 'function', 'class'], // Added 'class'
+    tokenModifiers: ['defaultLibrary']
+  };
+
+  const semanticProvider = {
+    getLegend: () => semanticLegend,
+    provideDocumentSemanticTokens: (model: any) => {
+      const lines = model.getLinesContent();
+      const data: number[] = [];
+      let prevLine = 0;
+      let prevChar = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Collect all tokens on this line, sorted by column
+        const tokens: { col: number; len: number; type: number }[] = [];
+
+        // 1. Built-in globals → type=0 (variable)
+        BUILTIN_GLOBALS_RE.lastIndex = 0;
+        let m;
+        while ((m = BUILTIN_GLOBALS_RE.exec(line)) !== null) {
+          tokens.push({ col: m.index, len: m[1].length, type: 0 });
+        }
+
+        // 2. Method calls (.log, .map, etc.) → type=1 (function)
+        METHOD_CALL_RE.lastIndex = 0;
+        while ((m = METHOD_CALL_RE.exec(line)) !== null) {
+          tokens.push({ col: m.index + 1, len: m[1].length, type: 1 });
+        }
+
+        // Sort by column position
+        tokens.sort((a, b) => a.col - b.col);
+
+        // Emit delta-encoded tokens
+        for (const t of tokens) {
+          const deltaLine = i - prevLine;
+          const deltaStart = deltaLine === 0 ? t.col - prevChar : t.col;
+          data.push(deltaLine, deltaStart, t.len, t.type, 1); // mod=defaultLibrary
+          prevLine = i;
+          prevChar = t.col;
+        }
+      }
+
+      return { data: new Uint32Array(data) };
+    },
+    releaseDocumentSemanticTokens: () => { }
+  };
+
+
+
+  // Re-write the provider to be simpler and reuse logic
+
+
+  monaco.languages.registerDocumentSemanticTokensProvider('javascript', semanticProvider);
+  monaco.languages.registerDocumentSemanticTokensProvider('typescript', semanticProvider);
+  monaco.languages.registerDocumentSemanticTokensProvider('java', {
+    getLegend: () => semanticLegend,
+    provideDocumentSemanticTokens: (model: any) => {
+      const lines = model.getLinesContent();
+      const data: number[] = [];
+      let prevLine = 0;
+      let prevChar = 0;
+
+      // Updated Regex to include optional @ prefix for easier checking
+      const CLASS_RE = /@?\b[A-Z][a-zA-Z0-9_]*\b/g;
+      const JAVA_METHOD_RE = /\b(\w+)\s*\(/g;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const tokens: { col: number; len: number; type: number }[] = [];
+
+        // Simple comment detection
+        const commentIdx = line.indexOf('//');
+        const effectiveLine = commentIdx !== -1 ? line.substring(0, commentIdx) : line;
+
+        if (line.trim().startsWith('*')) continue;
+
+        // 1. Classes (PascalCase)
+        CLASS_RE.lastIndex = 0;
+        let m;
+        while ((m = CLASS_RE.exec(effectiveLine)) !== null) {
+          // If starts with @, it's an annotation. Skip it. (Theme handles it)
+          if (m[0].startsWith('@')) continue;
+
+          // Exclude all-caps constants usually
+          if (m[0] === m[0].toUpperCase() && m[0].length > 1) continue;
+
+          tokens.push({ col: m.index, len: m[0].length, type: 2 });
+        }
+
+        // 2. Methods -> type=1 (function)
+        JAVA_METHOD_RE.lastIndex = 0;
+        while ((m = JAVA_METHOD_RE.exec(effectiveLine)) !== null) {
+          // Exclude Annotations (preceded by @) treated as methods
+          if (m.index > 0 && effectiveLine[m.index - 1] === '@') continue;
+
+          // Check if it's a keyword like 'if (', 'for ('
+          const keywordCheck = ['if', 'for', 'while', 'switch', 'catch', 'synchronized'].includes(m[1]);
+          if (!keywordCheck) {
+            tokens.push({ col: m.index, len: m[1].length, type: 1 });
+          }
+        }
+
+        tokens.sort((a, b) => a.col - b.col);
+
+        // Deduplicate
+        const uniqueTokens: typeof tokens = [];
+        if (tokens.length > 0) {
+          uniqueTokens.push(tokens[0]);
+          for (let k = 1; k < tokens.length; k++) {
+            const prev = uniqueTokens[uniqueTokens.length - 1];
+            const curr = tokens[k];
+            if (curr.col >= prev.col + prev.len) {
+              uniqueTokens.push(curr);
+            }
+          }
+        }
+
+        for (const t of uniqueTokens) {
+          const deltaLine = i - prevLine;
+          const deltaStart = deltaLine === 0 ? t.col - prevChar : t.col;
+          data.push(deltaLine, deltaStart, t.len, t.type, 0);
+          prevLine = i;
+          prevChar = t.col;
+        }
+      }
+      return { data: new Uint32Array(data) };
+    },
+    releaseDocumentSemanticTokens: () => { }
+  });
 });
 
 
-interface OpenFile {
-  path: string;
-  content: string;
-  isDirty: boolean;
-  // Diff Mode optional props
-  isDiff?: boolean;
-  originalContent?: string;
-  modifiedContent?: string;
-}
+// OpenFile imported from ../types/file
 
 // Prettier Imports (Dynamic import to avoid bundling issues if possible, but static for now)
 import * as prettier from 'prettier/standalone';
@@ -86,6 +230,11 @@ interface CodeEditorProps {
   onDiagnosticsChange?: (errors: number, warnings: number, markers: any[]) => void;
   settings?: any;
   workspaceDir?: string;
+  onMoveToOtherGroup?: () => void;
+  moveDirection?: 'left' | 'right';
+  isSplitView?: boolean;
+  onToggleSplit?: () => void;
+  isActive?: boolean;
 }
 
 // 바이너리 파일 확장자 목록
@@ -134,16 +283,23 @@ function CodeEditor({
   onReorderTabs,
   onDiagnosticsChange,
   settings,
-  workspaceDir
+  workspaceDir,
+  onMoveToOtherGroup,
+  moveDirection,
+  isSplitView,
+  onToggleSplit,
+  isActive = true
 }: CodeEditorProps) {
   const [language, setLanguage] = useState('javascript');
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [forceOpenBinary, setForceOpenBinary] = useState<Set<string>>(new Set());
   const [markdownPreview, setMarkdownPreview] = useState(false);
+  const { user } = useAuthStore();
 
   const activeFile = activeFileIndex >= 0 ? openFiles[activeFileIndex] : null;
   const isBinary = activeFile ? isBinaryFile(activeFile.path, activeFile.content) && !forceOpenBinary.has(activeFile.path) : false;
   const isMarkdown = language === 'markdown';
+  const [debouncedContent, setDebouncedContent] = useState('');
   const [fileErrors, setFileErrors] = useState<{ [path: string]: number }>({});
   const monaco = useMonaco();
 
@@ -153,6 +309,17 @@ function CodeEditor({
     window.addEventListener('markdown-preview-toggle', handleToggle);
     return () => window.removeEventListener('markdown-preview-toggle', handleToggle);
   }, []);
+
+  // Debounce Markdown Content
+  useEffect(() => {
+    if (!isMarkdown || !activeFile) return;
+
+    const handler = setTimeout(() => {
+      setDebouncedContent(activeFile.content);
+    }, 300); // 300ms delay
+
+    return () => clearTimeout(handler);
+  }, [activeFile?.content, isMarkdown]);
 
   // Listen to Monaco Markers (Errors)
   useEffect(() => {
@@ -324,6 +491,23 @@ function CodeEditor({
     };
   }, [editorInstance]);
 
+  // Go To Line Event Listener
+  useEffect(() => {
+    if (!editorInstance) return;
+
+    const handleGoToLine = (e: any) => {
+      const lineNumber = parseInt(e.detail, 10);
+      if (!isNaN(lineNumber)) {
+        editorInstance.revealLineInCenter(lineNumber);
+        editorInstance.setPosition({ lineNumber, column: 1 });
+        editorInstance.focus();
+      }
+    };
+
+    window.addEventListener('gluon:goto-line', handleGoToLine);
+    return () => window.removeEventListener('gluon:goto-line', handleGoToLine);
+  }, [editorInstance]);
+
   const tabsRef = useRef<HTMLDivElement>(null);
 
   // Scroll active tab into view
@@ -433,245 +617,303 @@ function CodeEditor({
             ))}
           </div>
 
-          {/* Scroll Buttons - Always Visible */}
-          <div className="tab-scroll-controls">
-            <button
-              className="tab-nav-btn"
-              onClick={() => handleTabNav('prev')}
-              title="Previous Tab"
-              disabled={activeFileIndex <= 0}
-              style={{ opacity: activeFileIndex <= 0 ? 0.3 : 1, cursor: activeFileIndex <= 0 ? 'default' : 'pointer' }}
-            >
-              <ChevronLeftIcon size={16} />
-            </button>
-            <button
-              className="tab-nav-btn"
-              onClick={() => handleTabNav('next')}
-              title="Next Tab"
-              disabled={activeFileIndex >= openFiles.length - 1}
-              style={{ opacity: activeFileIndex >= openFiles.length - 1 ? 0.3 : 1, cursor: activeFileIndex >= openFiles.length - 1 ? 'default' : 'pointer' }}
-            >
-              <ChevronRightIcon size={16} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Tab Context Menu */}
-      {contextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              onCloseTab(contextMenu.index);
-              setContextMenu(null);
-            }}
-          >
-            Close
-          </div>
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              onCloseOthers?.(contextMenu.index);
-              setContextMenu(null);
-            }}
-          >
-            Close Others
-          </div>
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              onCloseToRight?.(contextMenu.index);
-              setContextMenu(null);
-            }}
-          >
-            Close to the Right
-          </div>
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              onCloseAll?.();
-              setContextMenu(null);
-            }}
-          >
-            Close All
-          </div>
-          <div className="context-menu-separator"></div>
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              onSave(contextMenu.index);
-              setContextMenu(null);
-            }}
-          >
-            Save
-          </div>
-        </div>
-      )}
-
-      {/* Monaco Editor or Diff Editor */}
-      {activeFile ? (
-        <div className="editor-container">
-          {/* File Path Breadcrumb */}
-          {workspaceDir && activeFile.path && (() => {
-            const relativePath = activeFile.path.startsWith(workspaceDir)
-              ? activeFile.path.slice(workspaceDir.length + 1)
-              : activeFile.path;
-            const segments = relativePath.split('/');
-            const fileName = segments.pop() || '';
-            const FileIcon = getIconForFile(fileName);
-
-            return (
-              <div className="file-breadcrumb">
-                {segments.length > 0 && (
-                  <span>{segments.join(' > ')} &gt; </span>
-                )}
-                {FileIcon}
-                <span style={{ marginLeft: 4 }}>{fileName}</span>
-              </div>
-            );
-          })()}
-          {isBinary ? (
-            <div className="binary-file-warning">
-              <div className="binary-warning-card">
-                <div className="binary-warning-icon">
-                  {getIconForFile(activeFile!.path, 48)}
-                </div>
-                <div className="binary-warning-ext">
-                  .{activeFile!.path.split('.').pop()?.toUpperCase()}
-                </div>
-                <p className="binary-file-message">
-                  This file is binary or uses an unsupported encoding.<br />
-                  Opening it may display unreadable content.
-                </p>
+          {/* Right Side Controls - Only visible on active pane */}
+          {isActive && (
+            <div className="tab-controls-right" style={{ display: 'flex', alignItems: 'center', height: '100%', borderLeft: '1px solid var(--border-color)' }}>
+              {/* Split Toggle Button */}
+              {onToggleSplit && (
                 <button
-                  className="binary-open-anyway"
-                  onClick={() => {
-                    setForceOpenBinary(prev => new Set(prev).add(activeFile!.path));
+                  onClick={onToggleSplit}
+                  title={isSplitView ? 'Close Split View' : 'Split Editor Right'}
+                  className="tab-control-button"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    padding: '0 8px',
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center'
                   }}
                 >
-                  Open Anyway
+                  {isSplitView ? <SingleIcon size={16} /> : <SplitIcon size={16} />}
                 </button>
-              </div>
-            </div>
-          ) : activeFile.isDiff ? (
-            <DiffEditor
-              height="100%"
-              language={language}
-              original={activeFile.originalContent}
-              modified={activeFile.modifiedContent}
-              theme={language === 'markdown' ? 'gluon-markdown' : language === 'python' ? 'gluon-quantum' : (language === 'c' || language === 'cpp') ? 'gluon-carbon' : 'gluon-classic'}
-              options={{
-                renderSideBySide: true,
-                fontSize: settings?.fontSize ?? 14,
-                fontFamily: "'Fira Code', 'Consolas', monospace",
-                minimap: { enabled: settings?.minimap ?? false },
-                fixedOverflowWidgets: true,
-                scrollBeyondLastLine: false,
-                renderOverviewRuler: false,
-                overviewRulerBorder: false,
-                readOnly: true,
-                automaticLayout: true,
-                mouseWheelZoom: true
-              }}
-            />
-          ) : (isMarkdown && markdownPreview) ? (
-            <MarkdownPreview
-              content={activeFile.content}
-              fileName={activeFile.path.split('/').pop()}
-            />
-          ) : (
-            <Editor
-              height="100%"
-              path={activeFile.path}
-              language={language}
-              onMount={(editor) => {
-                setEditorInstance(editor);
-                if (monaco) {
-                  editor.addCommand(
-                    monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,
-                    () => editor.trigger('source', 'editor.action.copyLinesUpAction', null)
-                  );
-                  editor.addCommand(
-                    monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow,
-                    () => editor.trigger('source', 'editor.action.copyLinesDownAction', null)
-                  );
-                }
-              }}
-              value={activeFile.content}
-              onChange={handleEditorChange}
-              theme={language === 'markdown' ? 'gluon-markdown' : language === 'python' ? 'gluon-quantum' : (language === 'c' || language === 'cpp') ? 'gluon-carbon' : 'gluon-classic'}
-              beforeMount={(monaco) => {
-                const configurePrettier = (lang: string, parser: string, plugins: any[]) => {
-                  monaco.languages.registerDocumentFormattingEditProvider(lang, {
-                    async provideDocumentFormattingEdits(model, _options, _token) {
-                      const text = model.getValue();
-                      try {
-                        const formatted = await prettier.format(text, {
-                          parser,
-                          plugins,
-                          singleQuote: true,
-                          tabWidth: 2,
-                        });
-                        return [
-                          {
-                            range: model.getFullModelRange(),
-                            text: formatted,
-                          },
-                        ];
-                      } catch (err) {
-                        console.error('Prettier format error:', err);
-                        return [];
-                      }
-                    },
-                  });
-                };
+              )}
 
-                configurePrettier('javascript', 'babel', [parserBabel, parserEstree]);
-                configurePrettier('typescript', 'typescript', [parserTs, parserEstree]);
-                configurePrettier('html', 'html', [parserHtml]);
-                configurePrettier('css', 'css', [parserCss]);
-                configurePrettier('json', 'json', [parserBabel, parserEstree]);
-              }}
-              options={{
-                fontSize: settings?.fontSize ?? 14,
-                fontFamily: settings?.fontFamily ?? "'Fira Code', 'Consolas', monospace",
-                fontLigatures: settings?.fontLigatures ?? true,
-                minimap: { enabled: settings?.minimap ?? false },
-                lineNumbers: settings?.lineNumbers ? 'on' : 'off',
-                roundedSelection: true,
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: settings?.tabSize ?? 2,
-                insertSpaces: settings?.insertSpaces ?? true,
-                wordWrap: settings?.wordWrap ? 'on' : 'off',
-                mouseWheelZoom: true,
-              }}
-            />
+              {/* Tab Navigation Buttons */}
+              <button
+                className="tab-nav-btn"
+                onClick={() => handleTabNav('prev')}
+                title="Previous Tab"
+                disabled={activeFileIndex <= 0}
+                style={{ opacity: activeFileIndex <= 0 ? 0.3 : 1, cursor: activeFileIndex <= 0 ? 'default' : 'pointer' }}
+              >
+                <ChevronLeftIcon size={16} />
+              </button>
+              <button
+                className="tab-nav-btn"
+                onClick={() => handleTabNav('next')}
+                title="Next Tab"
+                disabled={activeFileIndex >= openFiles.length - 1}
+                style={{ opacity: activeFileIndex >= openFiles.length - 1 ? 0.3 : 1, cursor: activeFileIndex >= openFiles.length - 1 ? 'default' : 'pointer' }}
+              >
+                <ChevronRightIcon size={16} />
+              </button>
+            </div>
           )}
         </div>
-      ) : (
-        <div className="editor-empty-state">
-          {/* Logo */}
-          <div className="empty-logo">
-            <span className="logo-text">Gluon</span>
-            <span className="logo-edition">Pro Edition</span>
-          </div>
+      )
+      }
 
-          {/* Shortcut */}
-          <div className="empty-shortcuts" style={{ pointerEvents: 'none' }}>
-            <div className="shortcut-item">
-              <span className="shortcut-label">Code with Agent</span>
-              <span className="shortcut-key">Ctrl + L</span>
+      {/* Tab Context Menu */}
+      {
+        contextMenu && (
+          <div
+            className="context-menu"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                onCloseTab(contextMenu.index);
+                setContextMenu(null);
+              }}
+            >
+              Close
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                onCloseOthers?.(contextMenu.index);
+                setContextMenu(null);
+              }}
+            >
+              Close Others
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                onCloseToRight?.(contextMenu.index);
+                setContextMenu(null);
+              }}
+            >
+              Close to the Right
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                onCloseAll?.();
+                setContextMenu(null);
+              }}
+            >
+              Close All
+            </div>
+            <div className="context-menu-separator"></div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                onSave(contextMenu.index);
+                setContextMenu(null);
+              }}
+            >
+              Save
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+
+      {/* Monaco Editor or Diff Editor */}
+      {
+        activeFile ? (
+          <div className="editor-container">
+            {/* File Path Breadcrumb */}
+            {workspaceDir && activeFile.path && (() => {
+              const relativePath = activeFile.path.startsWith(workspaceDir)
+                ? activeFile.path.slice(workspaceDir.length + 1)
+                : activeFile.path;
+              const segments = relativePath.split('/');
+              const fileName = segments.pop() || '';
+              const FileIcon = getIconForFile(fileName);
+
+              return (
+                <div className="file-breadcrumb">
+                  {segments.length > 0 && (
+                    <span>{segments.join(' > ')} &gt; </span>
+                  )}
+                  {FileIcon}
+                  <span style={{ marginLeft: 4 }}>{fileName}</span>
+                </div>
+              );
+            })()}
+            {isBinary ? (
+              <div className="binary-file-warning">
+                <div className="binary-warning-card">
+                  <div className="binary-warning-icon">
+                    {getIconForFile(activeFile!.path, 48)}
+                  </div>
+                  <div className="binary-warning-ext">
+                    .{activeFile!.path.split('.').pop()?.toUpperCase()}
+                  </div>
+                  <p className="binary-file-message">
+                    This file is binary or uses an unsupported encoding.<br />
+                    Opening it may display unreadable content.
+                  </p>
+                  <button
+                    className="binary-open-anyway"
+                    onClick={() => {
+                      setForceOpenBinary(prev => new Set(prev).add(activeFile!.path));
+                    }}
+                  >
+                    Open Anyway
+                  </button>
+                </div>
+              </div>
+            ) : activeFile.isDiff ? (
+              <DiffEditor
+                height="100%"
+                language={language}
+                original={activeFile.originalContent}
+                modified={activeFile.modifiedContent}
+                theme={
+                  language === 'markdown' ? 'gluon-markdown' :
+                    language === 'python' ? 'gluon-quantum' :
+                      (language === 'c' || language === 'cpp') ? 'gluon-carbon' :
+                        (language === 'javascript' || language === 'typescript') ? 'gluon-neon' :
+                          language === 'java' ? 'gluon-java' :
+                            'gluon-classic'
+                }
+                options={{
+                  renderSideBySide: true,
+                  fontSize: settings?.fontSize ?? 14,
+                  fontFamily: "'Fira Code', 'Consolas', monospace",
+                  minimap: { enabled: settings?.minimap ?? false },
+                  fixedOverflowWidgets: true,
+                  scrollBeyondLastLine: false,
+                  renderOverviewRuler: false,
+                  overviewRulerBorder: false,
+                  readOnly: true,
+                  automaticLayout: true,
+                  mouseWheelZoom: true
+                }}
+              />
+            ) : (
+              <>
+                {/* Markdown Preview: Render if markdown, hidden if preview inactive */}
+                {isMarkdown && (
+                  <div style={{ display: markdownPreview ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
+                    <MarkdownPreview
+                      content={debouncedContent}
+                      fileName={activeFile.path.split('/').pop()}
+                    />
+                  </div>
+                )}
+
+                {/* Editor: Always render to keep state/history, hide if preview active */}
+                <div style={{ display: (isMarkdown && markdownPreview) ? 'none' : 'block', height: '100%' }}>
+                  <Editor
+                    height="100%"
+                    path={activeFile.path}
+                    language={language}
+                    onMount={(editor) => {
+                      setEditorInstance(editor);
+                      // Force-enable semantic highlighting for JS/TS
+                      editor.updateOptions({
+                        'semanticHighlighting.enabled': true
+                      } as any);
+                      if (monaco) {
+                        editor.addCommand(
+                          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,
+                          () => editor.trigger('source', 'editor.action.copyLinesUpAction', null)
+                        );
+                        editor.addCommand(
+                          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow,
+                          () => editor.trigger('source', 'editor.action.copyLinesDownAction', null)
+                        );
+                      }
+                    }}
+                    value={activeFile.content}
+                    onChange={handleEditorChange}
+                    theme={
+                      language === 'markdown' ? 'gluon-markdown' :
+                        language === 'python' ? 'gluon-quantum' :
+                          (language === 'c' || language === 'cpp') ? 'gluon-carbon' :
+                            (language === 'javascript' || language === 'typescript') ? 'gluon-neon' :
+                              language === 'java' ? 'gluon-java' :
+                                'gluon-classic'
+                    }
+                    beforeMount={(monaco) => {
+                      const configurePrettier = (lang: string, parser: string, plugins: any[]) => {
+                        monaco.languages.registerDocumentFormattingEditProvider(lang, {
+                          async provideDocumentFormattingEdits(model, _options, _token) {
+                            const text = model.getValue();
+                            try {
+                              const formatted = await prettier.format(text, {
+                                parser,
+                                plugins,
+                                singleQuote: true,
+                                tabWidth: 2,
+                              });
+                              return [
+                                {
+                                  range: model.getFullModelRange(),
+                                  text: formatted,
+                                },
+                              ];
+                            } catch (err) {
+                              console.error('Prettier format error:', err);
+                              return [];
+                            }
+                          },
+                        });
+                      };
+
+                      configurePrettier('javascript', 'babel', [parserBabel, parserEstree]);
+                      configurePrettier('typescript', 'typescript', [parserTs, parserEstree]);
+                      configurePrettier('html', 'html', [parserHtml]);
+                      configurePrettier('css', 'css', [parserCss]);
+                      configurePrettier('json', 'json', [parserBabel, parserEstree]);
+                    }}
+                    options={{
+                      fontSize: settings?.fontSize ?? 14,
+                      fontFamily: settings?.fontFamily ?? "'Fira Code', 'Consolas', monospace",
+                      fontLigatures: settings?.fontLigatures ?? true,
+                      minimap: { enabled: settings?.minimap ?? false },
+                      lineNumbers: settings?.lineNumbers ? 'on' : 'off',
+                      roundedSelection: true,
+                      scrollBeyondLastLine: false,
+                      automaticLayout: true,
+                      tabSize: settings?.tabSize ?? 2,
+                      insertSpaces: settings?.insertSpaces ?? true,
+                      wordWrap: settings?.wordWrap ? 'on' : 'off',
+                      mouseWheelZoom: true,
+                      'semanticHighlighting.enabled': true,
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="editor-empty-state">
+            {/* Logo */}
+            <div className="empty-logo">
+              <span className={`logo-text ${user?.role === 'root' ? 'root' : ''}`}>Gluon</span>
+              <span className="logo-edition">Pro Edition</span>
+            </div>
+
+            {/* Shortcut */}
+            <div className="empty-shortcuts" style={{ pointerEvents: 'none' }}>
+              <div className="shortcut-item">
+                <span className="shortcut-label">Code with Agent</span>
+                <span className="shortcut-key">Ctrl + L</span>
+              </div>
+            </div>
+          </div>
+        )
+      }
+    </div >
   );
 }
 export default CodeEditor;

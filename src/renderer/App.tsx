@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { KeyBinding, DEFAULT_SHORTCUTS } from './types/shortcuts';
+import { OpenFile } from './types/file';
 import Sidebar from './components/Sidebar';
 import FileExplorer from './components/FileExplorer';
 import CodeEditor from './components/CodeEditor';
@@ -9,6 +10,7 @@ import SettingsPanel from './components/SettingsPanel';
 
 import GitPanel from './components/GitPanel';
 import SearchPanel from './components/SearchPanel';
+import DebugPanel from './components/DebugPanel';
 import Resizer from './components/Resizer';
 import {
   SearchIcon, GitIcon, SettingsIcon, ZoomInIcon, PlusIcon, MinusIcon, ActivityIcon,
@@ -30,19 +32,14 @@ import './styles/App.css';
 import SSHConnectionModal from './components/SSHConnectionModal';
 import WelcomeScreen from './components/WelcomeScreen';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
+import InAppFileBrowser, { FileBrowserMode } from './components/InAppFileBrowser';
 
 /**
  * Gluon 메인 애플리케이션 컴포넌트 - VS Code 스타일 레이아웃
  */
-interface OpenFile {
-  path: string;
-  content: string;
-  isDirty: boolean;
-  // Diff Mode optional props
-  isDiff?: boolean;
-  originalContent?: string;
-  modifiedContent?: string;
-}
+// OpenFile interface moved to types/file.ts
+
+// LoginModal import removed
 
 // 인증 상태 컴포넌트
 const AuthStatus = () => {
@@ -81,34 +78,42 @@ const AuthStatus = () => {
       <button
         onClick={async () => {
           const { useAuthStore } = await import('./store/authStore');
-          useAuthStore.getState().login();
+          useAuthStore.getState().openLoginModal();
         }}
         className="header-icon-button"
-        title="Sign In"
         style={{
           background: 'none',
           border: 'none',
           color: '#cccccc',
           cursor: 'pointer',
-          padding: '4px',
+          padding: '0',
+          height: '32px',
+          boxSizing: 'border-box',
+          gap: '4px',
+          paddingLeft: '4px',
+          paddingRight: '0px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center'
         }}
       >
         <div style={{
-          width: '24px',
-          height: '24px',
+          width: '16px',
+          height: '16px',
           borderRadius: '50%',
           background: '#3c3c3c',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          lineHeight: 0
         }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
             <circle cx="12" cy="7" r="4"></circle>
           </svg>
+        </div>
+        <div style={{ opacity: 0.5, display: 'flex', alignItems: 'center', paddingTop: '2px' }}>
+          <ChevronDownIcon size={18} />
         </div>
       </button>
     );
@@ -117,32 +122,41 @@ const AuthStatus = () => {
   return (
     <div style={{ position: 'relative' }} ref={dropdownRef}>
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px', cursor: 'pointer' }}
-        title={user.email}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '4px',
+          cursor: 'pointer',
+          height: '32px',
+          boxSizing: 'border-box',
+          gap: '4px', // 아이콘과 꺽쇠 사이 간격 증가
+          paddingLeft: '4px',
+          paddingRight: '0px' // 오른쪽 패딩 제거
+        }}
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
       >
-        {user.picture ? (
-          <img
-            src={user.picture}
-            alt={user.full_name}
-            style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid #3c3c3c' }}
-          />
-        ) : (
-          <div style={{
-            width: '24px',
-            height: '24px',
-            borderRadius: '50%',
-            background: '#007acc',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '12px',
-            fontWeight: 'bold'
-          }}>
-            {user.email?.charAt(0).toUpperCase()}
-          </div>
-        )}
+        <div style={{
+          width: '16px',
+          height: '16px',
+          borderRadius: '50%',
+          // 역할 기반 색상 (네온 글로우)
+          background: user.role === 'root' ? 'linear-gradient(135deg, #b957ce, #57b9ce)' : // Root -> 네온 퍼플 + 블루 그라데이션
+            user.role === 'subscriber' ? '#2980b9' :
+              '#8e44ad', // 사용자 -> 보라색
+          boxShadow: user.role === 'root' ? '0 0 8px #b957ce' :
+            user.role === 'subscriber' ? '0 0 6px #2980b9' :
+              '0 0 6px #8e44ad',
+          transition: 'all 0.3s ease',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          {/* Text Removed */}
+        </div>
+        <div style={{ opacity: 0.5, display: 'flex', alignItems: 'center', paddingTop: '2px' }}>
+          <ChevronDownIcon size={18} />
+        </div>
       </div>
 
       {isDropdownOpen && (
@@ -173,14 +187,28 @@ import { EditorSettings, DEFAULT_EDITOR_SETTINGS } from './types/settings';
 // ... (existing imports)
 
 import { GlobalTooltip } from './components/GlobalTooltip';
+import { LoginScreen } from './components/LoginScreen';
+import { useAuthStore } from './store/authStore';
+import CommandPalette from './components/CommandPalette';
+import { useCommandStore } from './store/commandStore'; // Added this import for useAuthStore
+import { InterpreterSelector } from './components/InterpreterSelector';
+
+import EditorPane from './components/EditorPane';
 
 function App() {
-  const [sidebarView, setSidebarView] = useState<'explorer' | 'search' | 'git'>('explorer');
+  const isLoginModalOpen = useAuthStore((state) => state.isLoginModalOpen);
+  const [sidebarView, setSidebarView] = useState<'explorer' | 'search' | 'git' | 'debug'>('explorer');
   const [isAIPanelOpen, setIsAIPanelOpen] = useState(false);
+
+  // Split View State
+  const [editorSplitRatio, setEditorSplitRatio] = useState(0.5); // 0.5 = 50% split
+
 
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+  const [isInterpreterSelectorOpen, setIsInterpreterSelectorOpen] = useState(false);
+  const [selectedInterpreter, setSelectedInterpreter] = useState<string | undefined>(undefined);
   const [editorSettings, setEditorSettings] = useState<EditorSettings>(DEFAULT_EDITOR_SETTINGS);
 
   // 설정 로드 함수 - settings.json에서 읽어옴
@@ -218,9 +246,33 @@ function App() {
     loadEditorSettings();
   }, []);
 
-  // 여러 파일 관리
-  const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
-  const [activeFileIndex, setActiveFileIndex] = useState<number>(-1);
+  // 여러 파일 관리 (Primary / Secondary Split View)
+  const [primaryFiles, setPrimaryFiles] = useState<OpenFile[]>([]);
+  const [primaryActiveIndex, setPrimaryActiveIndex] = useState<number>(-1);
+
+  const [secondaryFiles, setSecondaryFiles] = useState<OpenFile[]>([]);
+  const [secondaryActiveIndex, setSecondaryActiveIndex] = useState<number>(-1);
+
+  const [activeGroup, setActiveGroup] = useState<'primary' | 'secondary'>('primary');
+  const [isSplitView, setIsSplitView] = useState(false);
+
+  // Helper to get current active file based on group
+  const activeFileIndex = activeGroup === 'primary' ? primaryActiveIndex : secondaryActiveIndex;
+  const openFiles = activeGroup === 'primary' ? primaryFiles : secondaryFiles;
+  const setOpenFiles = (files: OpenFile[] | ((prev: OpenFile[]) => OpenFile[])) => {
+    if (activeGroup === 'primary') {
+      setPrimaryFiles(files);
+    } else {
+      setSecondaryFiles(files);
+    }
+  };
+  const setActiveFileIndex = (index: number | ((prev: number) => number)) => {
+    if (activeGroup === 'primary') {
+      setPrimaryActiveIndex(index);
+    } else {
+      setSecondaryActiveIndex(index);
+    }
+  };
 
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
 
@@ -252,19 +304,56 @@ function App() {
   const [cloneUrl, setCloneUrl] = useState('');
   const [isCloning, setIsCloning] = useState(false);
 
+  // 인앱 파일 브라우저 상태
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [fileBrowserMode, setFileBrowserMode] = useState<FileBrowserMode>('selectFolder');
+  const [fileBrowserRemote, setFileBrowserRemote] = useState(false);
+  const [fileBrowserInitialPath, setFileBrowserInitialPath] = useState<string | undefined>(undefined);
+  const fileBrowserResolveRef = useRef<(value: string | null) => void>(() => { });
+
+  // 원격 워크스페이스 상태
+  const [isRemoteWorkspace, setIsRemoteWorkspace] = useState(false);
+  const [remoteUser, setRemoteUser] = useState('');
+
+  // 인앱 알림 모달
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
+
+  // Promise 기반 인앱 파일 브라우저 호출 래퍼
+  const showFileBrowser = (mode: FileBrowserMode, remote = false, initialPath?: string): Promise<string | null> => {
+    return new Promise((resolve) => {
+      fileBrowserResolveRef.current = resolve;
+      setFileBrowserMode(mode);
+      setFileBrowserRemote(remote);
+      setFileBrowserInitialPath(initialPath);
+      setFileBrowserOpen(true);
+    });
+  };
+
+  const handleFileBrowserSelect = (path: string) => {
+    setFileBrowserOpen(false);
+    fileBrowserResolveRef.current(path);
+  };
+
+  const handleFileBrowserCancel = () => {
+    setFileBrowserOpen(false);
+    fileBrowserResolveRef.current(null);
+  };
+
   const handleCloneRepo = () => {
     setShowCloneModal(true);
   };
 
   const executeClone = async () => {
     if (!cloneUrl) {
-      alert('Please enter a repository URL');
+      setAlertMessage('Please enter a repository URL');
       return;
     }
 
     try {
-      const dirResult = await window.electron.dialog.openDirectory();
-      if (dirResult.canceled || !dirResult.path) return;
+      const selectedPath = await showFileBrowser('selectFolder');
+      if (!selectedPath) return;
+      const dirResult = { path: selectedPath };
 
       setIsCloning(true);
 
@@ -276,15 +365,19 @@ function App() {
 
       if (result.success) {
         setWorkspaceDir(targetDir);
-        setOpenFiles([]);
-        setActiveFileIndex(-1);
+        setPrimaryFiles([]);
+        setPrimaryActiveIndex(-1);
+        setSecondaryFiles([]);
+        setSecondaryActiveIndex(-1);
+        setIsSplitView(false);
+        setActiveGroup('primary');
         setShowCloneModal(false);
         setCloneUrl('');
       } else {
-        alert(`Clone failed: ${result.error}`);
+        setAlertMessage(`Clone failed: ${result.error}`);
       }
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      setAlertMessage(`Error: ${err.message}`);
     } finally {
       setIsCloning(false);
     }
@@ -324,12 +417,19 @@ function App() {
         setActiveFileIndex(existingIndex);
       } else {
         // 새로 열기
-        setOpenFiles([...openFiles, newFile]);
-        setActiveFileIndex(openFiles.length);
+        // Always open diff in primary group for now? Or active group?
+        // Let's open in active group.
+        if (activeGroup === 'primary') {
+          setPrimaryFiles([...primaryFiles, newFile]);
+          setPrimaryActiveIndex(primaryFiles.length);
+        } else {
+          setSecondaryFiles([...secondaryFiles, newFile]);
+          setSecondaryActiveIndex(secondaryFiles.length);
+        }
       }
     } catch (error) {
       console.error('Failed to open diff:', error);
-      alert('Failed to open diff view');
+      setAlertMessage('Failed to open diff view');
     }
   };
 
@@ -366,21 +466,16 @@ function App() {
 
 
 
-  // 워크스페이스 존재 여부 감시 (3초마다)
+  // 워크스페이스 존재 여부 감시 (3초마다) — 원격 모드에서는 스킵
   useEffect(() => {
-    if (!workspaceDir) return;
+    if (!workspaceDir || isRemoteWorkspace) return;
 
     const checkWorkspaceExists = async () => {
       try {
         const result = await window.electron.fs.exists(workspaceDir);
         if (result.success && !result.exists) {
-          // 디렉토리가 사라짐 -> 알림 후 리셋
-          if (confirm(`Project directory '${workspaceDir}' not found.\nIt may have been deleted or moved.\n\nThe application will reload to the initial state.`)) {
-            window.location.reload();
-          } else {
-            // 취소해도 사실 방법이 없음... 일단 리셋이 안전
-            window.location.reload();
-          }
+          setAlertMessage(`프로젝트 디렉토리 '${workspaceDir}'를 찾을 수 없습니다.\n삭제되었거나 이동되었을 수 있습니다.`);
+          setTimeout(() => window.location.reload(), 3000);
         }
       } catch (error) {
         console.error('Workspace check failed:', error);
@@ -389,7 +484,7 @@ function App() {
 
     const interval = setInterval(checkWorkspaceExists, 3000);
     return () => clearInterval(interval);
-  }, [workspaceDir]);
+  }, [workspaceDir, isRemoteWorkspace]);
 
   // 메뉴 외부 클릭 시 닫기
   // 메뉴 외부 클릭 시 닫기
@@ -447,14 +542,104 @@ function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, [isAIPanelOpen]);
 
+  // Command Palette Logic
+  const { actions: commandActions } = useCommandStore();
+
+  useEffect(() => {
+    // Global Keyboard Shortcuts for Command Palette
+    const handleGlobalKeydown = (e: KeyboardEvent) => {
+      // Ctrl+Shift+P or F1 -> Command Mode
+      if (((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') || e.key === 'F1') {
+        e.preventDefault();
+        commandActions.openPalette('command');
+      }
+      // Ctrl+P -> File Mode
+      else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        commandActions.openPalette('file');
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeydown);
+
+    // Register Core Commands
+    commandActions.registerCommand({
+      id: 'window.reload',
+      title: 'Reload Window',
+      handler: () => window.location.reload(),
+      shortcut: 'Ctrl+R'
+    });
+    commandActions.registerCommand({
+      id: 'settings.open',
+      title: 'Open Settings',
+      handler: () => setSettingsOpen(true),
+      shortcut: 'Ctrl+,'
+    });
+    commandActions.registerCommand({
+      id: 'sidebar.toggle',
+      title: 'Toggle Sidebar',
+      handler: () => toggleSidebar(),
+      shortcut: 'Ctrl+B'
+    });
+    commandActions.registerCommand({
+      id: 'terminal.toggle',
+      title: 'Toggle Terminal',
+      handler: () => setIsTerminalOpen(prev => !prev),
+      shortcut: 'Ctrl+J'
+    });
+    commandActions.registerCommand({
+      id: 'ai.toggle',
+      title: 'Toggle AI Panel',
+      handler: () => setIsAIPanelOpen(prev => !prev),
+      shortcut: 'Ctrl+L'
+    });
+    commandActions.registerCommand({
+      id: 'file.new',
+      title: 'New File',
+      handler: () => handleNewFile(),
+      shortcut: 'Ctrl+N'
+    });
+    commandActions.registerCommand({
+      id: 'file.save',
+      title: 'Save File',
+      handler: () => handleFileSave(activeFileIndex),
+      shortcut: 'Ctrl+S'
+    });
+
+    commandActions.registerCommand({
+      id: 'view.splitEditor',
+      title: 'Split Editor',
+      handler: () => {
+        if (!isSplitView) {
+          // Open current file in secondary group
+          if (activeGroup === 'primary' && primaryActiveIndex !== -1) {
+            const currentFile = primaryFiles[primaryActiveIndex];
+            setSecondaryFiles([currentFile]);
+            setSecondaryActiveIndex(0);
+          }
+          setIsSplitView(true);
+          setActiveGroup('secondary');
+        } else {
+          // Already split, maybe focus next group?
+          setActiveGroup(prev => prev === 'primary' ? 'secondary' : 'primary');
+        }
+      },
+      shortcut: 'Ctrl+\\'
+    });
+    commandActions.registerCommand({
+      id: 'view.toggleSplit',
+      title: 'Toggle Split View',
+      handler: () => setIsSplitView(prev => !prev),
+      shortcut: 'Ctrl+Shift+\\'
+    });
+
+    return () => window.removeEventListener('keydown', handleGlobalKeydown);
+  }, [activeFileIndex, openFiles, activeGroup, isSplitView, primaryFiles, secondaryFiles, primaryActiveIndex, secondaryActiveIndex]);
+
   // 파일 열기 핸들러 (탭 추가)
   const handleFileOpen = async (filePath: string) => {
-    // 이미 열린 파일인지 확인
-    const existingIndex = openFiles.findIndex(f => f.path === filePath);
-    if (existingIndex !== -1) {
-      setActiveFileIndex(existingIndex);
-      return;
-    }
+    // 파일 열기 시 웰컴 스크린 강제 표시 해제
+    setForceShowWelcome(false);
 
     if (!window.electron?.fs?.readFile) {
       console.error('❌ Electron fs API not available');
@@ -462,7 +647,9 @@ function App() {
     }
 
     try {
-      const result = await window.electron.fs.readFile(filePath);
+      const result = isRemoteWorkspace
+        ? await window.electron.sftp.read(filePath)
+        : await window.electron.fs.readFile(filePath);
 
       if (result.success && result.content !== undefined) {
         const newFile: OpenFile = {
@@ -471,8 +658,24 @@ function App() {
           isDirty: false
         };
 
-        setOpenFiles([...openFiles, newFile]);
-        setActiveFileIndex(openFiles.length);
+        if (activeGroup === 'primary') {
+          const existingIndex = primaryFiles.findIndex(f => f.path === filePath);
+          if (existingIndex !== -1) {
+            setPrimaryActiveIndex(existingIndex);
+          } else {
+            setPrimaryFiles([...primaryFiles, newFile]);
+            setPrimaryActiveIndex(primaryFiles.length);
+          }
+        } else {
+          const existingIndex = secondaryFiles.findIndex(f => f.path === filePath);
+          if (existingIndex !== -1) {
+            setSecondaryActiveIndex(existingIndex);
+          } else {
+            setSecondaryFiles([...secondaryFiles, newFile]);
+            setSecondaryActiveIndex(secondaryFiles.length);
+          }
+        }
+
         console.log('✅ 파일 열기 성공:', filePath);
       } else {
         console.error('파일 읽기 실패:', result.error);
@@ -482,7 +685,52 @@ function App() {
     }
   };
 
-  // 파일 저장 핸들러
+
+
+  // Helper for internal handlers
+  const handleCloseTabInternal = async (index: number, group: 'primary' | 'secondary') => {
+    // Logic duplicated from old handleCloseTab but explicit
+    const files = group === 'primary' ? primaryFiles : secondaryFiles;
+    const setFiles = group === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+    const activeIdx = group === 'primary' ? primaryActiveIndex : secondaryActiveIndex;
+    const setIdx = group === 'primary' ? setPrimaryActiveIndex : setSecondaryActiveIndex;
+
+    const fileToClose = files[index];
+    if (!fileToClose) return;
+
+    if (fileToClose.isDirty) {
+      const proceed = await checkUnsavedChanges([fileToClose]);
+      if (!proceed) return;
+    }
+
+    const newFiles = files.filter((_, i) => i !== index);
+    setFiles(newFiles);
+    if (activeIdx >= index) {
+      setIdx(Math.max(0, Math.min(activeIdx - (activeIdx > index ? 1 : 0), newFiles.length - 1)));
+    }
+    if (newFiles.length === 0) setIdx(-1);
+  };
+
+  const handleFileSaveInternal = (index: number | undefined, group: 'primary' | 'secondary') => {
+    const files = group === 'primary' ? primaryFiles : secondaryFiles;
+    const activeIdx = group === 'primary' ? primaryActiveIndex : secondaryActiveIndex;
+    const targetIndex = index ?? activeIdx;
+
+    if (targetIndex === -1) return;
+    const file = files[targetIndex];
+    if (file) {
+      saveSingleFile(file).then(success => {
+        if (success) {
+          const setFiles = group === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+          const newFiles = [...files];
+          newFiles[targetIndex] = { ...file, isDirty: false };
+          setFiles(newFiles);
+        }
+      });
+    }
+  };
+
+  // 파일 저장 핸들러 (Legacy wrapper for commands)
   const handleFileSave = async (index: number = activeFileIndex) => {
     if (index === -1) {
       console.warn('저장할 파일이 선택되지 않았습니다');
@@ -502,14 +750,16 @@ function App() {
 
       // untitled 파일이면 저장 다이얼로그 표시
       if (filePath.startsWith('untitled-')) {
-        const result = await window.electron.dialog.saveFile();
-        if (!result.success || !result.path || result.canceled) {
+        const savePath = await showFileBrowser('saveFile');
+        if (!savePath) {
           return; // 사용자가 취소함
         }
-        filePath = result.path;
+        filePath = savePath;
       }
 
-      const result = await window.electron.fs.writeFile(filePath, fileToSave.content);
+      const result = isRemoteWorkspace
+        ? await window.electron.sftp.write(filePath, fileToSave.content)
+        : await window.electron.fs.writeFile(filePath, fileToSave.content);
 
       if (result.success) {
         // isDirty 플래그 제거 및 경로 업데이트
@@ -529,50 +779,62 @@ function App() {
     }
   };
 
-  // 모든 변경된 파일 저장
+  // 모든 변경된 파일 저장 (Primary & Secondary)
   const handleSaveAll = async () => {
-    let currentOpenFiles = [...openFiles];
     let hasChanges = false;
+    let newPrimaryFiles = [...primaryFiles];
+    let newSecondaryFiles = [...secondaryFiles];
 
-    // 순차적으로 처리하여 State Race Condition 방지
-    for (let i = 0; i < currentOpenFiles.length; i++) {
-      if (currentOpenFiles[i].isDirty) {
-        const file = currentOpenFiles[i];
-        try {
-          let filePath = file.path;
-          // Untitled logic
-          if (filePath.startsWith('untitled-')) {
-            if (!window.electron?.dialog?.saveFile) continue;
-            const result = await window.electron.dialog.saveFile();
-            if (!result.success || !result.path || result.canceled) continue; // Skip this file if cancelled
-            filePath = result.path;
-          }
-
-          if (window.electron?.fs?.writeFile) {
-            const writeResult = await window.electron.fs.writeFile(filePath, file.content);
-            if (writeResult.success) {
-              currentOpenFiles[i] = {
-                ...file,
-                path: filePath,
-                isDirty: false
-              };
-              hasChanges = true;
-              console.log('✅ 파일 저장 완료 (Save All):', filePath);
-            } else {
-              console.error('❌ 파일 저장 실패:', writeResult.error);
-            }
-          }
-        } catch (err) {
-          console.error('Error during Save All:', err);
+    // Primary Group
+    for (let i = 0; i < newPrimaryFiles.length; i++) {
+      if (newPrimaryFiles[i].isDirty) {
+        const file = newPrimaryFiles[i];
+        if (await saveSingleFile(file)) {
+          newPrimaryFiles[i] = { ...file, isDirty: false };
+          hasChanges = true;
+        }
+      }
+    }
+    // Secondary Group
+    for (let i = 0; i < newSecondaryFiles.length; i++) {
+      if (newSecondaryFiles[i].isDirty) {
+        const file = newSecondaryFiles[i];
+        if (await saveSingleFile(file)) {
+          newSecondaryFiles[i] = { ...file, isDirty: false };
+          hasChanges = true;
         }
       }
     }
 
     if (hasChanges) {
-      setOpenFiles(currentOpenFiles);
-      // Refresh file explorer if needed (e.g. if untitled files were saved to workspace)
+      setPrimaryFiles(newPrimaryFiles);
+      setSecondaryFiles(newSecondaryFiles);
       if (workspaceDir) handleForceRefresh();
     }
+  };
+
+  const saveSingleFile = async (file: OpenFile): Promise<boolean> => {
+    try {
+      let filePath = file.path;
+      if (filePath.startsWith('untitled-')) {
+        const savePath = await showFileBrowser('saveFile');
+        if (!savePath) return false;
+        filePath = savePath;
+      }
+      const writeFn = isRemoteWorkspace ? window.electron?.sftp?.write : window.electron?.fs?.writeFile;
+      if (writeFn) {
+        const res = await writeFn(filePath, file.content);
+        if (res.success) {
+          console.log('✅ Save All Success:', filePath);
+          return true;
+        } else {
+          console.error('❌ Save All Failed:', res.error);
+        }
+      }
+    } catch (err) {
+      console.error('Error in saveSingleFile', err);
+    }
+    return false;
   };
 
   // 새 파일 생성 핸들러
@@ -592,8 +854,12 @@ function App() {
       isDirty: true // 저장되지 않은 상태로 표시
     };
 
-    setOpenFiles([...openFiles, newFile]);
-    setActiveFileIndex(openFiles.length);
+    const targetSetFiles = activeGroup === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+    const targetSetActiveIndex = activeGroup === 'primary' ? setPrimaryActiveIndex : setSecondaryActiveIndex;
+    const targetFiles = activeGroup === 'primary' ? primaryFiles : secondaryFiles;
+
+    targetSetFiles([...targetFiles, newFile]);
+    targetSetActiveIndex(targetFiles.length);
   };
 
   // 새 창 생성 핸들러
@@ -613,17 +879,21 @@ function App() {
 
 
   // 파일 내용 변경 핸들러
-  const handleContentChange = (content: string) => {
-    if (activeFileIndex === -1) return;
-
-    const updatedFiles = [...openFiles];
-    updatedFiles[activeFileIndex] = {
-      ...updatedFiles[activeFileIndex],
-      content,
-      isDirty: true
-    };
-    setOpenFiles(updatedFiles);
+  const handlePrimaryContentChange = (content: string) => {
+    if (primaryActiveIndex === -1) return;
+    const newFiles = [...primaryFiles];
+    newFiles[primaryActiveIndex] = { ...newFiles[primaryActiveIndex], content, isDirty: true };
+    setPrimaryFiles(newFiles);
   };
+
+  const handleSecondaryContentChange = (content: string) => {
+    if (secondaryActiveIndex === -1) return;
+    const newFiles = [...secondaryFiles];
+    newFiles[secondaryActiveIndex] = { ...newFiles[secondaryActiveIndex], content, isDirty: true };
+    setSecondaryFiles(newFiles);
+  };
+
+
 
   // 변경사항 확인 및 저장 여부 묻기
   const checkUnsavedChanges = async (filesToCheck: OpenFile[]): Promise<boolean> => {
@@ -660,55 +930,78 @@ function App() {
 
   // 탭 닫기
   const handleCloseTab = async (index: number) => {
-    const fileToClose = openFiles[index];
+    // Determine which group's files to operate on
+    const currentFiles = activeGroup === 'primary' ? primaryFiles : secondaryFiles;
+    const currentActiveIndex = activeGroup === 'primary' ? primaryActiveIndex : secondaryActiveIndex;
+    const setFiles = activeGroup === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+    const setActiveIndex = activeGroup === 'primary' ? setPrimaryActiveIndex : setSecondaryActiveIndex;
+
+    const fileToClose = currentFiles[index];
+    if (!fileToClose) return; // Should not happen, but for safety
+
     if (fileToClose.isDirty) {
       const proceed = await checkUnsavedChanges([fileToClose]);
       if (!proceed) return;
     }
 
-    const newFiles = openFiles.filter((_, i) => i !== index);
-    setOpenFiles(newFiles);
+    const newFiles = currentFiles.filter((_, i) => i !== index);
+    setFiles(newFiles);
 
-    if (activeFileIndex === index) {
-      setActiveFileIndex(newFiles.length > 0 ? Math.min(index, newFiles.length - 1) : -1);
-    } else if (activeFileIndex > index) {
-      setActiveFileIndex(activeFileIndex - 1);
+    // Adjust active index for the current group
+    if (currentActiveIndex === index) {
+      // If the active tab is closed, set active to the new last tab or -1 if no tabs left
+      setActiveIndex(newFiles.length > 0 ? Math.min(index, newFiles.length - 1) : -1);
+    } else if (currentActiveIndex > index) {
+      // If a tab before the active tab is closed, shift active index left
+      setActiveIndex(currentActiveIndex - 1);
     }
+    // If a tab after the active tab is closed, active index remains the same
   };
 
   // 다른 탭 닫기
-  const handleCloseOthers = async (index: number) => {
-    const filesToClose = openFiles.filter((_, i) => i !== index);
+  // Internal close helpers
+  const handleCloseOthersInternal = async (index: number, group: 'primary' | 'secondary') => {
+    const files = group === 'primary' ? primaryFiles : secondaryFiles;
+    const setFiles = group === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+    const setActiveIndex = group === 'primary' ? setPrimaryActiveIndex : setSecondaryActiveIndex;
+
+    const filesToClose = files.filter((_, i) => i !== index);
     const proceed = await checkUnsavedChanges(filesToClose);
     if (!proceed) return;
 
-    const targetFile = openFiles[index];
-    setOpenFiles([targetFile]);
-    setActiveFileIndex(0);
+    const targetFile = files[index];
+    setFiles([targetFile]);
+    setActiveIndex(0);
   };
 
-  // 오른쪽 탭 닫기
-  const handleCloseToRight = async (index: number) => {
-    const filesToClose = openFiles.slice(index + 1);
+  const handleCloseToRightInternal = async (index: number, group: 'primary' | 'secondary') => {
+    const files = group === 'primary' ? primaryFiles : secondaryFiles;
+    const setFiles = group === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+    const activeIndex = group === 'primary' ? primaryActiveIndex : secondaryActiveIndex;
+    const setActiveIndex = group === 'primary' ? setPrimaryActiveIndex : setSecondaryActiveIndex;
+
+    const filesToClose = files.slice(index + 1);
     const proceed = await checkUnsavedChanges(filesToClose);
     if (!proceed) return;
 
-    const newFiles = openFiles.slice(0, index + 1);
-    setOpenFiles(newFiles);
+    const newFiles = files.slice(0, index + 1);
+    setFiles(newFiles);
 
-    // 활성 탭이 닫히는 영역(오른쪽)에 있었다면 타겟 탭(마지막)으로 이동
-    if (activeFileIndex > index) {
-      setActiveFileIndex(index);
+    if (activeIndex > index) {
+      setActiveIndex(index);
     }
   };
 
-  // 모든 탭 닫기
-  const handleCloseAll = async () => {
-    const proceed = await checkUnsavedChanges(openFiles);
+  const handleCloseAllInternal = async (group: 'primary' | 'secondary') => {
+    const files = group === 'primary' ? primaryFiles : secondaryFiles;
+    const setFiles = group === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+    const setActiveIndex = group === 'primary' ? setPrimaryActiveIndex : setSecondaryActiveIndex;
+
+    const proceed = await checkUnsavedChanges(files);
     if (!proceed) return;
 
-    setOpenFiles([]);
-    setActiveFileIndex(-1);
+    setFiles([]);
+    setActiveIndex(-1);
   };
 
   // 파일 삭제 시 탭 닫기 핸들러 (강제 닫기)
@@ -747,19 +1040,69 @@ function App() {
     }
   };
 
-  const handleReorderTabs = (fromIndex: number, toIndex: number) => {
+  const handleReorderTabsInternal = (fromIndex: number, toIndex: number, group: 'primary' | 'secondary') => {
     if (fromIndex === toIndex) return;
-    const updatedFiles = [...openFiles];
+
+    const files = group === 'primary' ? primaryFiles : secondaryFiles;
+    const setFiles = group === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+    const activeIndex = group === 'primary' ? primaryActiveIndex : secondaryActiveIndex;
+    const setActiveIndex = group === 'primary' ? setPrimaryActiveIndex : setSecondaryActiveIndex;
+
+    const updatedFiles = [...files];
     const [movedFile] = updatedFiles.splice(fromIndex, 1);
     updatedFiles.splice(toIndex, 0, movedFile);
 
     // activeFileIndex 조정
-    const currentActive = openFiles[activeFileIndex];
+    const currentActive = files[activeIndex];
     if (currentActive) {
       const newIndex = updatedFiles.findIndex(f => f.path === currentActive.path);
-      setActiveFileIndex(newIndex);
+      setActiveIndex(newIndex);
     }
-    setOpenFiles(updatedFiles);
+    setFiles(updatedFiles);
+  };
+
+  const handleMoveToOtherGroup = (group: 'primary' | 'secondary') => {
+    const files = group === 'primary' ? primaryFiles : secondaryFiles;
+    const setFiles = group === 'primary' ? setPrimaryFiles : setSecondaryFiles;
+    const activeIndex = group === 'primary' ? primaryActiveIndex : secondaryActiveIndex;
+    const setActiveIndex = group === 'primary' ? setPrimaryActiveIndex : setSecondaryActiveIndex;
+
+    const targetFiles = group === 'primary' ? secondaryFiles : primaryFiles;
+    const setTargetFiles = group === 'primary' ? setSecondaryFiles : setPrimaryFiles;
+    const setTargetActiveIndex = group === 'primary' ? setSecondaryActiveIndex : setPrimaryActiveIndex;
+
+    if (files.length === 0) return;
+
+    const fileToMove = files[activeIndex];
+    if (!fileToMove) return;
+
+    // 1. Remove from source
+    const newSourceFiles = files.filter((_, i) => i !== activeIndex);
+    setFiles(newSourceFiles);
+
+    // Adjust source active index
+    if (activeIndex >= newSourceFiles.length) {
+      setActiveIndex(Math.max(0, newSourceFiles.length - 1));
+    }
+
+    // 2. Add to target (append)
+    // Avoid duplicates? The move implies it leaves source.
+    // If it already exists in target (same path), we should probably just switch focus to it rather than adding duplicate.
+    const existingIndex = targetFiles.findIndex(f => f.path === fileToMove.path);
+    if (existingIndex !== -1) {
+      setTargetActiveIndex(existingIndex);
+    } else {
+      const newTargetFiles = [...targetFiles, fileToMove];
+      setTargetFiles(newTargetFiles);
+      setTargetActiveIndex(newTargetFiles.length - 1);
+    }
+
+    // 3. Ensure split view is visible if moving from primary to secondary
+    if (group === 'primary' && !isSplitView) {
+      setIsSplitView(true);
+      // Optional: set default ratio if not set? 
+      if (editorSplitRatio < 0.1 || editorSplitRatio > 0.9) setEditorSplitRatio(0.5);
+    }
   };
 
 
@@ -802,6 +1145,15 @@ function App() {
 
       const binding = shortcuts.find(s => s.currentKey === combo);
       if (!binding) return;
+
+      // 터미널 포커스 시 충돌하는 단축키 예외 처리 (Tmux Ctrl+B 등)
+      const isTerminalFocused = document.activeElement?.className.includes('xterm-helper-textarea');
+      if (isTerminalFocused) {
+        // 사이드바 토글(Ctrl+B)은 터미널로 통과시킴
+        if (binding.command === 'toggleSidebar') return;
+
+        // 필요하다면 다른 충돌 키도 여기서 예외 처리 가능
+      }
 
       // 앱 레벨에서 직접 처리하는 명령만 Monaco 이벤트 차단
       const appLevelCommands = new Set([
@@ -897,9 +1249,8 @@ function App() {
         case 'openFile': {
           (async () => {
             try {
-              const dialogResult = await window.electron.dialog.openFile();
-              if (!dialogResult.success || !dialogResult.path) return;
-              const filePath = dialogResult.path;
+              const filePath = await showFileBrowser('selectFile');
+              if (!filePath) return;
               // 이미 열려있으면 활성화
               const existingIdx = openFiles.findIndex(f => f.path === filePath);
               if (existingIdx !== -1) {
@@ -1100,18 +1451,17 @@ function App() {
 
   // 폴더 열기 핸들러
   const handleOpenFolder = async () => {
-    if (!window.electron?.dialog?.openDirectory) {
-      console.error('Electron dialog API not available');
-      return;
-    }
-
     try {
-      const result = await window.electron.dialog.openDirectory();
-
-      if (result.success && result.path) {
-        setWorkspaceDir(result.path);
+      const remoteInitialPath = isRemoteWorkspace
+        ? (workspaceDir || (remoteUser ? `/home/${remoteUser}` : '/'))
+        : undefined;
+      const selectedPath = await showFileBrowser('selectFolder', isRemoteWorkspace, remoteInitialPath);
+      if (selectedPath) {
+        setWorkspaceDir(selectedPath);
         setIsSidePanelOpen(true);
-        addToRecents(result.path); // 최근 목록에 추가
+        if (!isRemoteWorkspace) {
+          addToRecents(selectedPath);
+        }
       }
     } catch (error) {
       console.error('Failed to open folder:', error);
@@ -1135,6 +1485,41 @@ function App() {
       await window.electron.store.set('recents', newRecents);
     }
   };
+
+  // Split Toggle Handler
+  const handleToggleSplit = () => {
+    setIsSplitView(prev => {
+      const newState = !prev;
+      if (newState) {
+        // Splitting: Ensure secondary has content (duplicate current file)
+        if (secondaryFiles.length === 0 && primaryFiles.length > 0) {
+          const currentFile = primaryFiles[primaryActiveIndex];
+          if (currentFile) {
+            setSecondaryFiles([currentFile]);
+            setSecondaryActiveIndex(0);
+          }
+        }
+        setActiveGroup('secondary');
+        // If split ratio is extreme, reset it
+        if (editorSplitRatio < 0.1 || editorSplitRatio > 0.9) {
+          setEditorSplitRatio(0.5);
+        }
+      } else {
+        // Merging: Move files to primary
+        const newPrimary = [...primaryFiles];
+        secondaryFiles.forEach(f => {
+          if (!newPrimary.find(pf => pf.path === f.path)) {
+            newPrimary.push(f);
+          }
+        });
+        setPrimaryFiles(newPrimary);
+        setSecondaryFiles([]); // Clear secondary
+        setActiveGroup('primary');
+      }
+      return newState;
+    });
+  };
+
 
   // 파일 열기 핸들러
   const handleOpenFileDialog = async () => {
@@ -1174,23 +1559,29 @@ function App() {
         const sftpResult = await window.electron.sftp.start();
         if (sftpResult.success) {
           console.log('SFTP session started');
-          // 원격 홈 디렉토리 파일 목록 로드
-          const listResult = await window.electron.sftp.list(`/home/${config.username}`);
-          if (listResult.success) {
-            console.log('Remote files loaded:', listResult.files?.length);
-            // TODO: 파일 탐색기에 원격 파일 표시
-          }
         }
         setIsSSHModalOpen(false);
+        setRemoteUser(config.username);
+
+        // 원격 폴더 선택 브라우저 열기
+        const remotePath = await showFileBrowser('selectFolder', true, `/home/${config.username}`);
+        if (remotePath) {
+          setIsRemoteWorkspace(true);
+          setWorkspaceDir(remotePath);
+          setIsSidePanelOpen(true);
+          setOpenFiles([]);
+          setActiveFileIndex(-1);
+        }
+
+        // 터미널 열기 (TerminalPanel이 마운트 시 자동으로 cd remoteCwd 실행)
         if (!isTerminalOpen) {
           setIsTerminalOpen(true);
         }
-        alert(`Connected to ${config.host} via SSH + SFTP!`);
       } else {
-        alert(`SSH Connection Failed: ${result.error}`);
+        setAlertMessage(`SSH 연결 실패: ${result.error}`);
       }
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      setAlertMessage(`오류: ${err.message}`);
     }
   };
 
@@ -1214,6 +1605,7 @@ function App() {
     setWorkspaceDir(null);
     setOpenFiles([]);
     setActiveFileIndex(-1);
+    setDiagnostics({ errors: 0, warnings: 0, markers: [] });
     setSidebarView('explorer');
     setShowCloseProjectModal(false);
   };
@@ -1221,7 +1613,7 @@ function App() {
   // Run Project Logic
   const handleRunProject = () => {
     if (activeFileIndex < 0 || !openFiles[activeFileIndex]) {
-      alert("실행할 파일이 없습니다. 파일을 먼저 열어주세요.");
+      setAlertMessage("실행할 파일이 없습니다. 파일을 먼저 열어주세요.");
       return;
     }
     const currentFile = openFiles[activeFileIndex];
@@ -1272,29 +1664,80 @@ function App() {
         }));
       }, 100);
     } else {
-      alert("현재 디버깅은 Python 파일(.py)만 지원합니다.");
+      setAlertMessage("현재 디버깅은 Python 파일(.py)만 지원합니다.");
     }
   };
 
   // Global Keyboard Shortcuts (F5)
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // New Window: Ctrl+Shift+N
+      if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+        e.preventDefault();
+        handleNewWindow();
+        return;
+      }
+
       if (e.key === 'F5') {
         e.preventDefault();
-        if (e.ctrlKey) {
-          handleDebugProject();
+
+        if (!e.ctrlKey) {
+          // F5: Run Without Debugging
+          console.log('F5 Pressed: Run Without Debugging');
+          const currentFile = openFiles[activeFileIndex];
+          if (!currentFile || !currentFile.path) {
+            console.warn('No active file');
+            return;
+          }
+
+          // Auto-save before run
+          if (currentFile.isDirty) {
+            handleFileSave(activeFileIndex);
+          }
+
+          const ext = currentFile.path.split('.').pop()?.toLowerCase();
+          let command = '';
+
+          if (ext === 'py') {
+            // Use selected python path or fallback to python3
+            const pythonPath = selectedInterpreter || 'python3';
+            command = `"${pythonPath}" -u "${currentFile.path}"`;
+          } else if (ext === 'js') {
+            command = `node "${currentFile.path}"`;
+          } else if (ext === 'ts') {
+            command = `ts-node "${currentFile.path}"`;
+          } else {
+            setAlertMessage(`Running .${ext} files is not supported yet.`);
+            return;
+          }
+
+          if (command) {
+            if (!isTerminalOpen) {
+              setIsTerminalOpen(true);
+            }
+
+            // Dispatch event for TerminalPanel to handle UI + Process
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('gluon:run-command', {
+                detail: { command, file: currentFile.path }
+              }));
+            }, isTerminalOpen ? 0 : 300); // Small delay if opening terminal for the first time
+          }
         } else {
-          handleRunProject();
+          // Ctrl+F5: Start Debugging (Coming Soon)
+          console.log('Ctrl+F5 Pressed: Start Debugging (Not Implemented)');
+          setAlertMessage('Interactive Debugging is coming soon!\nUse F5 to Run without Debugging.');
         }
       }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [activeFileIndex, openFiles, isTerminalOpen]); // Dependencies important for closure capture
+  }, [activeFileIndex, openFiles, isTerminalOpen, workspaceDir, selectedInterpreter]);
 
   return (
     <div className="app">
+      <CommandPalette onFileSelect={handleFileOpen} workspaceDir={workspaceDir} />
       <GlobalTooltip />
       {/* ... header ... */}
       <header className="app-header">
@@ -1319,30 +1762,35 @@ function App() {
               {fileMenuOpen && (
                 <div className="dropdown-content">
                   <div className="dropdown-item" onClick={handleNewFile}>
-                    새 파일
+                    <span style={{ flex: 1 }}>New File</span>
+                    <span style={{ fontSize: '10px', color: '#666', marginLeft: '10px' }}>Ctrl+N</span>
                   </div>
                   <div className="dropdown-item" onClick={handleNewWindow}>
-                    새 창 (New Window)
+                    <span style={{ flex: 1 }}>New Window</span>
+                    <span style={{ fontSize: '10px', color: '#666', marginLeft: '10px' }}>Ctrl+Shift+N</span>
                   </div>
                   <div className="dropdown-divider"></div>
                   <div className="dropdown-item" onClick={() => {
                     setFileMenuOpen(false);
                     handleOpenFileDialog();
                   }}>
-                    파일 열기
+                    <span style={{ flex: 1 }}>Open File</span>
+                    <span style={{ fontSize: '10px', color: '#666', marginLeft: '10px' }}>Ctrl+O</span>
                   </div>
                   <div className="dropdown-item" onClick={() => {
                     setFileMenuOpen(false);
                     handleOpenFolder();
                   }}>
-                    폴더 열기
+                    <span style={{ flex: 1 }}>Open Folder</span>
+                    <span style={{ fontSize: '10px', color: '#666', marginLeft: '10px' }}>Ctrl+Shift+O</span>
                   </div>
                   <div className="dropdown-divider"></div>
                   <div className={`dropdown-item ${openFiles.some(f => f.isDirty) ? '' : 'disabled'}`} onClick={() => {
                     setFileMenuOpen(false);
                     handleSaveAll();
                   }}>
-                    저장 (Save All)
+                    <span style={{ flex: 1 }}>Save All</span>
+                    <span style={{ fontSize: '10px', color: '#666', marginLeft: '10px' }}>Ctrl+Shift+S</span>
                   </div>
                 </div>
               )}
@@ -1428,7 +1876,7 @@ function App() {
                     handleRunProject();
                   }}>
                     <PlayIcon size={14} />
-                    <span style={{ flex: 1 }}>Run Project</span>
+                    <span style={{ flex: 1 }}>Run</span>
                     <span style={{ fontSize: '10px', color: '#666', marginLeft: '10px' }}>F5</span>
                   </div>
                   <div className="dropdown-item" onClick={() => {
@@ -1436,7 +1884,8 @@ function App() {
                     handleDebugProject();
                   }}>
                     <BugIcon size={14} />
-                    <span>Debug</span>
+                    <span style={{ flex: 1 }}>Debug</span>
+                    <span style={{ fontSize: '10px', color: '#666', marginLeft: '10px' }}>Ctrl+F5</span>
                   </div>
                 </div>
               )}
@@ -1471,7 +1920,7 @@ function App() {
                   </div>
                   <div className="dropdown-item" onClick={() => {
                     setHelpMenuOpen(false);
-                    alert('You are using the latest version of Gluon (v1.0.0).');
+                    setAlertMessage('You are using the latest version of Gluon (v1.0.0).');
                   }}>
                     <UpdateIcon size={14} />
                     <span>Check for Updates</span>
@@ -1487,54 +1936,18 @@ function App() {
             <button
               className={`layout-button ${isSidePanelOpen ? 'active' : ''}`}
               onClick={toggleSidebar}
-              title="Toggle Primary Side Bar (Ctrl+B)"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: isSidePanelOpen ? '#ffffff' : '#858585',
-                cursor: 'pointer',
-                padding: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '4px'
-              }}
             >
               <SidebarLeftIcon size={16} />
             </button>
             <button
               className={`layout-button ${isTerminalOpen ? 'active' : ''}`}
               onClick={() => setIsTerminalOpen(prev => !prev)}
-              title="Toggle Panel (Ctrl+J)"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: isTerminalOpen ? '#ffffff' : '#858585',
-                cursor: 'pointer',
-                padding: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '4px'
-              }}
             >
               <LayoutBottomIcon size={16} />
             </button>
             <button
               className={`layout-button ${isAIPanelOpen ? 'active' : ''}`}
               onClick={() => setIsAIPanelOpen(prev => !prev)}
-              title="Toggle Secondary Side Bar (Ctrl+L)"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: isAIPanelOpen ? '#ffffff' : '#858585',
-                cursor: 'pointer',
-                padding: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '4px'
-              }}
             >
               <SidebarRightIcon size={16} />
             </button>
@@ -1542,33 +1955,33 @@ function App() {
           <button
             className="settings-button"
             onClick={() => setSettingsOpen(!settingsOpen)}
-            title="환경설정"
+
           >
             <SettingsIcon size={18} />
           </button>
           <div className="window-controls">
             {/* 로그인 상태 표시 (Window Controls 왼쪽) */}
-            <div style={{ display: 'flex', alignItems: 'center', marginRight: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginRight: '0px' }}>
               <AuthStatus />
             </div>
             <button
               className="window-button minimize"
               onClick={() => window.electron.window.minimize()}
-              title="최소화"
+
             >
               _
             </button>
             <button
               className="window-button maximize"
               onClick={() => window.electron.window.maximize()}
-              title="최대화/복원"
+
             >
               □
             </button>
             <button
               className="window-button close"
               onClick={() => window.electron.window.close()}
-              title="닫기"
+
             >
               ✕
             </button>
@@ -1668,6 +2081,7 @@ function App() {
             workspaceDir ? (
               <FileExplorer
                 workspaceDir={workspaceDir}
+                isRemote={isRemoteWorkspace}
                 onFileOpen={handleFileOpen}
                 onCloseProject={handleCloseProject}
                 refreshKey={refreshKey}
@@ -1692,7 +2106,11 @@ function App() {
             )
           )}
           {sidebarView === 'git' && (
-            workspaceDir ? (
+            isRemoteWorkspace ? (
+              <div className="panel-placeholder">
+                <p>원격 워크스페이스에서는 소스 제어를 사용할 수 없습니다.</p>
+              </div>
+            ) : workspaceDir ? (
               <GitPanel
                 workspaceDir={workspaceDir}
                 onFileClick={handleGitFileClick}
@@ -1702,6 +2120,9 @@ function App() {
                 <p>Git 저장소가 아닙니다.</p>
               </div>
             )
+          )}
+          {sidebarView === 'debug' && (
+            <DebugPanel workspaceDir={workspaceDir || undefined} />
           )}
 
         </div>
@@ -1727,15 +2148,16 @@ function App() {
         {/* 중앙 에디터 영역 및 터미널 (수직 배치) */}
         <div className="main-content-column" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-          {/* 상단 뷰 (WelcomeScreen 또는 CodeEditor) */}
+          {/* 상단 뷰 (WelcomeScreen 또는 CodeEditor 또는 LoginScreen) */}
           <div style={{
             flex: 1,
             overflow: 'hidden',
             display: terminalHeight > window.innerHeight * 0.8 ? 'none' : 'flex',
             flexDirection: 'column'
           }}>
-            {(!workspaceDir && openFiles.length === 0) || forceShowWelcome ? (
-
+            {isLoginModalOpen ? (
+              <LoginScreen />
+            ) : (!workspaceDir && primaryFiles.length === 0 && secondaryFiles.length === 0 && !isSplitView) || forceShowWelcome ? (
               <WelcomeScreen
                 onOpenProject={() => {
                   setForceShowWelcome(false);
@@ -1746,30 +2168,90 @@ function App() {
                   handleCloneRepo();
                 }}
                 onConnectSSH={() => {
-                  setForceShowWelcome(false);
-                  setIsSSHModalOpen(true);
+                  if (isRemoteWorkspace) {
+                    setDisconnectConfirmOpen(true);
+                  } else {
+                    setForceShowWelcome(false);
+                    setIsSSHModalOpen(true);
+                  }
                 }}
+                isRemote={isRemoteWorkspace}
+                remoteUser={remoteUser}
                 onLogin={handleLogin}
                 recents={recentProjects}
                 onOpenRecent={handleOpenRecent}
                 onRemoveRecent={handleRemoveRecent}
               />
             ) : (
-              <CodeEditor
-                openFiles={openFiles}
-                activeFileIndex={activeFileIndex}
-                onFileSelect={setActiveFileIndex}
-                onContentChange={handleContentChange}
-                onCloseTab={handleCloseTab}
-                onCloseOthers={handleCloseOthers}
-                onCloseToRight={handleCloseToRight}
-                onCloseAll={handleCloseAll}
-                onSave={handleFileSave}
-                settings={editorSettings}
-                onReorderTabs={handleReorderTabs}
-                onDiagnosticsChange={(errors, warnings, markers) => setDiagnostics({ errors, warnings, markers })}
-                workspaceDir={workspaceDir || undefined}
-              />
+              <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden' }}>
+                {/* Primary Editor Pane */}
+                <div style={{ flex: isSplitView ? editorSplitRatio : 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <EditorPane
+                    files={primaryFiles}
+                    activeIndex={primaryActiveIndex}
+                    onFileSelect={setPrimaryActiveIndex}
+                    onContentChange={handlePrimaryContentChange}
+                    onCloseTab={(idx) => handleCloseTabInternal(idx, 'primary')}
+                    onCloseOthers={(idx) => handleCloseOthersInternal(idx, 'primary')}
+                    onCloseToRight={(idx) => handleCloseToRightInternal(idx, 'primary')}
+                    onCloseAll={() => handleCloseAllInternal('primary')}
+                    onSave={(idx) => handleFileSaveInternal(idx, 'primary')}
+                    onReorderTabs={(from, to) => handleReorderTabsInternal(from, to, 'primary')}
+                    onMoveToOtherGroup={() => handleMoveToOtherGroup('primary')}
+                    moveDirection="right"
+                    settings={editorSettings}
+                    onDiagnosticsChange={(errors, warnings, markers) => setDiagnostics({ errors, warnings, markers })}
+                    workspaceDir={workspaceDir || undefined}
+                    isActive={activeGroup === 'primary'}
+                    onFocus={() => setActiveGroup('primary')}
+                    isSplitView={isSplitView}
+                    onToggleSplit={handleToggleSplit}
+                  />
+                </div>
+
+                {isSplitView && (
+                  <>
+                    <Resizer
+                      direction="horizontal"
+                      onResize={(delta) => {
+                        // Calculate new ratio based on pixel delta
+                        // Assuming container width is roughly window width - sidebars?
+                        // Or use ref to get container width.
+                        // For simplicity, let's just nudge percentages.
+                        // Delta is in pixels.
+                        setEditorSplitRatio(prev => {
+                          const containerWidth = window.innerWidth - (isSidePanelOpen ? sidePanelWidth : 0) - (isAIPanelOpen ? aiPanelWidth : 0);
+                          const ratioDelta = delta / containerWidth;
+                          return Math.max(0.1, Math.min(0.9, prev + ratioDelta));
+                        });
+                      }}
+                    />
+                    {/* Secondary Editor Pane */}
+                    <div style={{ flex: 1 - editorSplitRatio, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                      <EditorPane
+                        files={secondaryFiles}
+                        activeIndex={secondaryActiveIndex}
+                        onFileSelect={setSecondaryActiveIndex}
+                        onContentChange={handleSecondaryContentChange}
+                        onCloseTab={(idx) => handleCloseTabInternal(idx, 'secondary')}
+                        onCloseOthers={(idx) => handleCloseOthersInternal(idx, 'secondary')}
+                        onCloseToRight={(idx) => handleCloseToRightInternal(idx, 'secondary')}
+                        onCloseAll={() => handleCloseAllInternal('secondary')}
+                        onSave={(idx) => handleFileSaveInternal(idx, 'secondary')}
+                        onReorderTabs={(from, to) => handleReorderTabsInternal(from, to, 'secondary')}
+                        onMoveToOtherGroup={() => handleMoveToOtherGroup('secondary')}
+                        moveDirection="left"
+                        settings={editorSettings}
+                        workspaceDir={workspaceDir || undefined}
+                        isActive={activeGroup === 'secondary'}
+                        onFocus={() => setActiveGroup('secondary')}
+                        isSplitView={isSplitView}
+                        onToggleSplit={handleToggleSplit}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
 
@@ -1806,7 +2288,9 @@ function App() {
                 onClose={() => setIsTerminalOpen(false)}
                 onMaximize={handleToggleTerminalMaximize}
                 isMaximized={terminalHeight > window.innerHeight * 0.8}
-                cwd={workspaceDir || undefined}
+                cwd={isRemoteWorkspace ? undefined : (workspaceDir || undefined)}
+                isRemote={isRemoteWorkspace}
+                remoteCwd={isRemoteWorkspace && workspaceDir ? workspaceDir : undefined}
                 diagnostics={diagnostics}
               />
             </div>
@@ -1849,6 +2333,7 @@ function App() {
               projectName={workspaceDir ? workspaceDir.split('/').pop() : undefined}
               workspacePath={workspaceDir || undefined}
               onFileSystemChange={handleForceRefresh}
+              onCloseFile={handleFileDelete}
             />
           </div>
         </div>
@@ -1857,8 +2342,9 @@ function App() {
       {/* 하단 상태바 */}
       <footer className="app-footer">
         <div className="status-left">
-          <div className="remote-button" onClick={() => setIsSSHModalOpen(true)} data-tooltip="SSH Connection" data-tooltip-pos="top">
+          <div className="remote-button" onClick={() => isRemoteWorkspace ? setDisconnectConfirmOpen(true) : setIsSSHModalOpen(true)} data-tooltip={isRemoteWorkspace ? `Remote: ${remoteUser} (클릭으로 연결 해제)` : 'SSH Connection'} data-tooltip-pos="top">
             <ActivityIcon size={14} />
+            {isRemoteWorkspace && <span style={{ marginLeft: '4px', fontSize: '11px' }}>Remote</span>}
           </div>
 
 
@@ -1970,6 +2456,18 @@ function App() {
             </>
           )}
 
+          {/* Python Interpreter Status */}
+          <div
+            className="status-item clickable"
+            onClick={() => setIsInterpreterSelectorOpen(true)}
+            data-tooltip="Select Python Interpreter"
+            data-tooltip-pos="top"
+          >
+            <span className="status-value" style={{ color: '#F1D646' }}>
+              {selectedInterpreter ? `Python ${selectedInterpreter.split('/').slice(-3).join('/')}` : 'Select Python'}
+            </span>
+          </div>
+
 
         </div>
       </footer>
@@ -2040,6 +2538,68 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* 연결 해제 확인 모달 */}
+      {disconnectConfirmOpen && (
+        <div className="modal-overlay" onClick={() => setDisconnectConfirmOpen(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <h3 style={{ margin: '0 0 12px 0' }}>SSH 연결 해제</h3>
+            <p style={{ margin: '0 0 16px 0', lineHeight: '1.5', color: '#a6adc8' }}>
+              {remoteUser}@{workspaceDir} 연결을 해제하시겠습니까?
+            </p>
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button className="modal-btn cancel" onClick={() => setDisconnectConfirmOpen(false)}>취소</button>
+              <button className="modal-btn primary" style={{ background: '#f38ba8' }} onClick={() => {
+                setDisconnectConfirmOpen(false);
+                setIsRemoteWorkspace(false);
+                setWorkspaceDir(null);
+                setOpenFiles([]);
+                setActiveFileIndex(-1);
+                setDiagnostics({ errors: 0, warnings: 0, markers: [] });
+                setRemoteUser('');
+                setIsTerminalOpen(false);
+                window.dispatchEvent(new Event('terminal-close-all'));
+                window.electron.ssh.disconnect();
+              }}>연결 해제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 인앱 알림 모달 */}
+      {alertMessage && (
+        <div className="modal-overlay" onClick={() => setAlertMessage(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <p style={{ margin: '0 0 16px 0', lineHeight: '1.5' }}>{alertMessage}</p>
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="modal-btn primary" onClick={() => setAlertMessage(null)}>확인</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 인앱 파일 브라우저 */}
+      {fileBrowserOpen && (
+        <InAppFileBrowser
+          mode={fileBrowserMode}
+          remote={fileBrowserRemote}
+          initialPath={fileBrowserInitialPath}
+          onSelect={handleFileBrowserSelect}
+          onCancel={handleFileBrowserCancel}
+        />
+      )}
+      {/* Login Modal removed */}
+
+      <InterpreterSelector
+        isOpen={isInterpreterSelectorOpen}
+        onClose={() => setIsInterpreterSelectorOpen(false)}
+        onSelect={(path) => {
+          setSelectedInterpreter(path);
+          // Optional: Save to store or notify user
+          console.log('Selected interpreter:', path);
+        }}
+        currentPath={selectedInterpreter}
+      />
     </div >
   );
 }

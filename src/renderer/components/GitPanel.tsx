@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import '../styles/GitPanel.css';
 import { GitIcon, RotateCcwIcon, PlusIcon, UploadIcon, DownloadIcon, ChevronDownIcon, GithubIcon, getIconForFile } from './Icons';
 import ConfirmModal from './ConfirmModal';
+import DiffView from './DiffView';
 
 interface GitPanelProps {
     workspaceDir?: string;
@@ -49,7 +50,7 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [commitMessage, setCommitMessage] = useState('');
-    const [selectedFileDiff, setSelectedFileDiff] = useState<{ path: string, content: string } | null>(null);
+    const [selectedFileDiff, setSelectedFileDiff] = useState<{ path: string, original: string, modified: string } | null>(null);
     const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
     const [showBranchDropdown, setShowBranchDropdown] = useState(false);
     const [showCreateBranchModal, setShowCreateBranchModal] = useState(false);
@@ -154,10 +155,15 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
     const handleFileClick = async (filePath: string) => {
         if (!workspaceDir) return;
         try {
-            const result = await window.electron.git.diff(workspaceDir, filePath);
-            if (result.success) {
-                setSelectedFileDiff({ path: filePath, content: result.original || '' });
-            }
+            const [diffResult, fileResult] = await Promise.all([
+                window.electron.git.diff(workspaceDir, filePath),
+                window.electron.fs.readFile(filePath.startsWith('/') ? filePath : `${workspaceDir}/${filePath}`)
+            ]);
+
+            const original = diffResult.success ? diffResult.original : '';
+            const modified = fileResult.success ? (fileResult.content || '') : '';
+
+            setSelectedFileDiff({ path: filePath, original, modified });
         } catch (err: any) {
             console.error(err);
         }
@@ -929,14 +935,18 @@ const GitPanel: React.FC<GitPanelProps> = ({ workspaceDir, onFileClick }) => {
             {
                 selectedFileDiff && (
                     <div className="git-diff-modal" onClick={() => setSelectedFileDiff(null)}>
-                        <div className="git-diff-content" onClick={e => e.stopPropagation()}>
+                        <div className="git-diff-content" onClick={e => e.stopPropagation()} style={{ width: '90vw', height: '90vh', maxWidth: 'none' }}>
                             <div className="git-diff-header">
-                                <h4>HEAD: {selectedFileDiff.path}</h4>
+                                <h4>{selectedFileDiff.path}</h4>
                                 <button onClick={() => setSelectedFileDiff(null)}>✕</button>
                             </div>
-                            <pre className="git-diff-body">
-                                {selectedFileDiff.content || '(New File or Empty)'}
-                            </pre>
+                            <div className="git-diff-body" style={{ flex: 1, padding: 0, overflow: 'hidden' }}>
+                                <DiffView
+                                    original={selectedFileDiff.original}
+                                    modified={selectedFileDiff.modified}
+                                    language={selectedFileDiff.path.split('.').pop() || 'text'}
+                                />
+                            </div>
                         </div>
                     </div>
                 )

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
-import { TerminalIcon, PlusCircleIcon, XIcon, ChevronUpIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ErrorIcon, WarningIcon } from './Icons';
+import { TerminalIcon, PlusCircleIcon, XIcon, ChevronUpIcon, ChevronDownIcon, ErrorIcon, WarningIcon, BashIcon, ZshIcon, TmuxIcon, PowerShellIcon } from './Icons';
 import '@xterm/xterm/css/xterm.css';
 import '../styles/TerminalPanel.css';
 
@@ -12,6 +12,8 @@ interface TerminalPanelProps {
   onMaximize?: () => void;
   isMaximized?: boolean;
   cwd?: string;
+  isRemote?: boolean;
+  remoteCwd?: string;
   diagnostics?: { errors: number; warnings: number; markers?: any[] };
 }
 
@@ -37,25 +39,145 @@ interface ProblemsTab extends BaseTab {
 
 type Tab = TerminalTab | ProblemsTab;
 
-const SHELL_TYPES = [
-  { value: 'default', label: 'Terminal' },
-  { value: 'bash', label: 'Bash' },
-  { value: 'zsh', label: 'Zsh' },
-  { value: 'sh', label: 'Sh' },
-];
 
-function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { errors: 0, warnings: 0, markers: [] } }: TerminalPanelProps) {
+
+function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, isRemote = false, remoteCwd, diagnostics = { errors: 0, warnings: 0, markers: [] } }: TerminalPanelProps) {
+  const isRemoteRef = useRef(isRemote);
+  isRemoteRef.current = isRemote;
+  const remoteCwdRef = useRef(remoteCwd);
+  remoteCwdRef.current = remoteCwd;
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'terminal' | 'problems'>('terminal');
+  const [instanceDropdownOpen, setInstanceDropdownOpen] = useState(false);
+
+  // Shell Dropdown State
+  const [isShellDropdownOpen, setIsShellDropdownOpen] = useState(false);
+  const [shellTypes, setShellTypes] = useState([
+    { value: 'default', label: 'Default' },
+    { value: 'bash', label: 'Bash' },
+    { value: 'zsh', label: 'Zsh' },
+    { value: 'tmux', label: 'Tmux' },
+  ]);
 
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Fetch System Shell for "Default" label
+  useEffect(() => {
+    const fetchSystemShell = async () => {
+      if (!window.electron?.terminal?.getSystemShell) return;
+      try {
+        const result = await window.electron.terminal.getSystemShell();
+        if (result.success && result.shell) {
+          // e.g. /bin/zsh -> Zsh
+          const name = result.shell.replace(/\\.exe$/, '').split(/[\\\\/]/).pop();
+          if (name) {
+            const label = name.charAt(0).toUpperCase() + name.slice(1);
+            setShellTypes(prev => {
+              const defaultOption = { ...prev[0], label };
+              const others = prev.slice(1).filter(s => s.label.toLowerCase() !== label.toLowerCase());
+              return [defaultOption, ...others];
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Failed to get system shell:', e);
+      }
+    };
+    fetchSystemShell();
+  }, []);
+
+  // Update existing 'Default' tabs to actual shell name when fetched
+  useEffect(() => {
+    const defaultLabel = shellTypes.find(s => s.value === 'default')?.label;
+    if (defaultLabel && defaultLabel !== 'Default') {
+      setTabs(prev => prev.map(tab => {
+        if (tab.type === 'terminal' && tab.shellType === 'default' && tab.name === 'Default') {
+          return { ...tab, name: defaultLabel };
+        }
+        return tab;
+      }));
+    }
+  }, [shellTypes]);
+
+  // Sidebar Resize Logic
+  const [sidebarWidth, setSidebarWidth] = useState(200);
+  const isResizingRef = useRef(false);
+
+  const startResizing = useCallback(() => {
+    isResizingRef.current = true;
+    document.addEventListener('mousemove', resize);
+    document.addEventListener('mouseup', stopResizing);
+    document.body.style.cursor = 'ew-resize';
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    isResizingRef.current = false;
+    document.removeEventListener('mousemove', resize);
+    document.removeEventListener('mouseup', stopResizing);
+    document.body.style.cursor = 'default';
+    // Trigger fit after resize ends to ensure terminal fits new space
+    setTimeout(() => {
+      window.dispatchEvent(new Event('resize'));
+    }, 50);
+  }, []);
+
+  const resize = useCallback((e: MouseEvent) => {
+    if (isResizingRef.current && containerRef.current) {
+      const containerRect = containerRef.current.getBoundingClientRect();
+      // Calculate new width: Container Right - Mouse X
+      let newWidth = containerRect.right - e.clientX;
+
+      // Constraints & Snap Logic
+      if (newWidth < 120) {
+        newWidth = 48; // Snap to Icon Mode
+      } else if (newWidth < 150) {
+        newWidth = 150; // Minimum expanded width
+      } else if (newWidth > 400) {
+        newWidth = 400; // Maximum size
+      }
+
+      setSidebarWidth(newWidth);
+    }
+  }, []);
+
+  // Shell Dropdown Outside Click
+  useEffect(() => {
+    if (!isShellDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.shell-dropdown-trigger')) {
+        setIsShellDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isShellDropdownOpen]);
+
+  // 드롭다운 외부 클릭 시 닫기
+  useEffect(() => {
+    if (!instanceDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.instance-selector')) {
+        setInstanceDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [instanceDropdownOpen]);
+
+  const tabsRef = useRef<Tab[]>(tabs);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
 
   // 전역 터미널 이벤트 리스너 설정
   useEffect(() => {
     if (!window.electron?.terminal) return;
 
     const cleanup1 = window.electron.terminal.onData((terminalId: string, data: string) => {
-      const tab = tabs.find(t => t.id === terminalId) as TerminalTab;
+      const tab = tabsRef.current.find(t => t.id === terminalId) as TerminalTab;
       if (tab && tab.type === 'terminal') {
         tab.term.write(data);
       }
@@ -63,117 +185,249 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
 
     const cleanup2 = window.electron.terminal.onExit((terminalId: string, code: number) => {
       console.log(`Terminal ${terminalId} exited with code ${code}`);
-      // 탭 제거
-      handleCloseTab(terminalId);
+
+      // If it's the Run tab, don't close it automatically so user can see output
+      if (terminalId === 'gluon-run-terminal') {
+        const tab = tabsRef.current.find(t => t.id === terminalId) as TerminalTab;
+        if (tab && tab.type === 'terminal') {
+          tab.term.write(`\r\n\x1b[33mProcess exited with code ${code}\x1b[0m\r\n`);
+        }
+        return;
+      }
+
+      window.dispatchEvent(new CustomEvent('terminal-close-tab-internal', { detail: terminalId }));
     });
 
     return () => {
       cleanup1();
       cleanup2();
     };
+  }, []); // Remove dependency on tabs to prevent re-subscription race
+
+  // Internal listener for exit cleanup
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      handleCloseTab(e.detail);
+    };
+    window.addEventListener('terminal-close-tab-internal', handler as EventListener);
+    return () => window.removeEventListener('terminal-close-tab-internal', handler as EventListener);
+  }, [tabs]); // This one can depend on tabs/handleCloseTab, as it's for cleanup, not critical data stream
+
+  // 외부에서 모든 터미널 닫기 (SSH 해제 시)
+  useEffect(() => {
+    const handleCloseAll = () => {
+      tabs.forEach(tab => {
+        if (tab.type === 'terminal') {
+          (tab as TerminalTab).term.dispose();
+          window.electron.terminal.kill(tab.id);
+        }
+      });
+      setTabs([]);
+      setActiveTabId(null);
+    };
+    window.addEventListener('terminal-close-all', handleCloseAll);
+    return () => window.removeEventListener('terminal-close-all', handleCloseAll);
   }, [tabs]);
+
+  // Fit helper
+  const fitTerminal = () => {
+    if (!activeTabId || !containerRef.current) return;
+    const tab = tabs.find(t => t.id === activeTabId) as TerminalTab;
+    if (!tab || tab.type !== 'terminal' || !tab.fitAddon) return;
+
+    try {
+      // Force layout calculation
+      void containerRef.current.offsetHeight;
+
+      tab.fitAddon.fit();
+
+      // Double fit for safety in flex layouts
+      setTimeout(() => {
+        if (!tab.fitAddon) return;
+        tab.fitAddon.fit();
+        const { cols, rows } = tab.term;
+        if (cols > 0 && rows > 0) {
+          if (isRemoteRef.current) {
+            window.electron.ssh.resize(tab.id, cols, rows);
+          } else {
+            window.electron.terminal.resize(tab.id, cols, rows);
+          }
+        }
+      }, 0);
+
+      const { cols, rows } = tab.term;
+      if (cols > 0 && rows > 0) {
+        if (isRemoteRef.current) {
+          window.electron.ssh.resize(tab.id, cols, rows);
+        } else {
+          window.electron.terminal.resize(tab.id, cols, rows);
+        }
+      }
+    } catch (e) {
+      console.warn('Fit error:', e);
+    }
+  };
+
+  // Resize Effect to trigger fitTerminal when sidebarWidth changes
+  useEffect(() => {
+    // Determine content area size change
+    requestAnimationFrame(() => {
+      fitTerminal();
+    });
+  }, [sidebarWidth]);
+
+  const handleCloseTab = (tabId: string) => {
+    setTabs(prev => {
+      const filtered = prev.filter(t => t.id !== tabId);
+
+      if (activeTabId === tabId && filtered.length > 0) {
+        const nextTab = filtered[filtered.length - 1];
+        setActiveTabId(nextTab.id);
+        if (nextTab.type === 'terminal') {
+          setTimeout(() => (nextTab as TerminalTab).term.focus(), 50);
+        }
+      } else if (filtered.length === 0) {
+        setActiveTabId(null);
+      }
+
+      const tab = prev.find(t => t.id === tabId);
+      if (tab && tab.type === 'terminal') {
+        tab.term.dispose();
+        if (!isRemoteRef.current) {
+          window.electron.terminal.kill(tabId);
+        } else {
+          window.electron.ssh.closeShell(tabId);
+        }
+      }
+
+      return filtered;
+    });
+  };
 
   // Handle external run commands and Problems tab
   useEffect(() => {
     const handleRunCommand = (e: CustomEvent<any>) => {
       const detail = e.detail;
-      // Support legacy string format or new object format
       const command = typeof detail === 'string' ? detail : detail.command;
       const file = typeof detail === 'string' ? null : detail.file;
 
+      console.log('gluon:run-command received:', { command, file, isRemote: isRemoteRef.current });
+
       if (!command) return;
 
-      // Check if SPECIFIC file has errors (if file context is known)
       if (file && diagnostics.markers) {
-        // Normalize paths for comparison (simple inclusion check usually works for absolute paths)
-        // marker.resource.path might be a URI (file://...) or just path.
         const fileHasErrors = diagnostics.markers.some(m => {
-          if (m.severity !== 8) return false; // 8 is MarkerSeverity.Error
-          // Compare paths loosely to handle file:// prefix diffs
+          if (m.severity !== 8) return false;
           return m.resource.path.includes(file) || file.includes(m.resource.path);
         });
 
         if (fileHasErrors) {
-          // Block and show problems
-          const existing = tabs.find(t => t.type === 'problems');
-          if (existing) {
-            setActiveTabId(existing.id);
-          } else {
-            const newTab: ProblemsTab = {
-              id: `problems-${Date.now()}`,
-              name: 'Problems',
-              type: 'problems'
-            };
-            setTabs(prev => [...prev, newTab]);
-            setActiveTabId(newTab.id);
-          }
+          setViewMode('problems');
           return;
         }
       }
-      // Note: If no file context (generic command), we allow running even if there are errors elsewhere.
 
-      // 1. Determine Target Tab
-      let targetTabId = activeTabId;
 
-      if (file) {
-        const runTabId = `run-${file}`;
-        const existingTab = tabs.find(t => t.id === runTabId) as TerminalTab;
+      console.log('gluon:run-command received:', { command, file, isRemote: isRemoteRef.current });
 
-        if (existingTab && existingTab.type === 'terminal') {
-          targetTabId = runTabId;
-          setActiveTabId(runTabId);
-          // Send Ctrl+C to ensure clean prompt, then wait slightly before sending command
-          // This prevents "double echo" issues where command is printed before prompt is ready
-          window.electron.terminal.write(runTabId, '\u0003'); // Ctrl+C
-          setTimeout(() => {
-            window.electron.terminal.write(runTabId, command + '\r');
-            existingTab.term.focus(); // Focus after command
-          }, 100);
-        } else {
-          handleAddTab('default', runTabId, command);
-        }
-      } else {
-        if (activeTabId) {
-          const tab = tabs.find(t => t.id === activeTabId) as TerminalTab;
-          if (tab && tab.type === 'terminal') {
-            window.electron.terminal.write(activeTabId, command + '\r');
-            tab.term.focus();
-          } else {
-            handleAddTab('default', undefined, command);
-          }
-        } else {
-          handleAddTab('default', undefined, command);
+      if (!command) return;
+
+      if (file && diagnostics.markers) {
+        // ... (existing diagnostic check logic - preserving it implicitly if not replacing whole block, 
+        // but here we are replacing from line 263. So need to include it.)
+        const fileDiagnostics = diagnostics.markers.filter(d =>
+          d.resource.toString() === `file://${file}` &&
+          d.severity === 1
+        );
+
+        if (fileDiagnostics.length > 0) {
+          setViewMode('problems');
+          // return; // User prefers to run even if errors? Previous code didn't block.
+          // Actually previous code had:
+          /*
+           if (fileHasErrors) {
+             setViewMode('problems');
+             return;
+           }
+          */
+          // Let's restore that behavior if it was there.
+          // Viewing lines 267-277 in previous `view_file` (lines 268-278 in provided block):
+          /*
+           if (file && diagnostics.markers) {
+               const fileHasErrors = ...
+               if (fileHasErrors) { setViewMode('problems'); return; }
+           }
+          */
         }
       }
+
+      // Need to restore the check logic properly since we are replacing the handler start.
+      // Wait, let's just replace the body part concerning execution, to avoid messing up the top.
+      // But `async` keyword needs to be added to the function definition.
+      // The function definition is at line 258 `const handleRunCommand = ...`.
+      // I can't easily change it to `async` without replacing the definition line.
+      // Or I can execute an IIFE inside? 
+      // `(async () => { ... })()`
+
+
+
+      (async () => {
+        // Single Run Instance Logic
+        const RUN_TAB_ID = 'gluon-run-terminal';
+
+        // 1. Clean up existing run instance if present
+        const existingRunTab = tabs.find(t => t.id === RUN_TAB_ID);
+        if (existingRunTab) {
+          if (existingRunTab.type === 'terminal') {
+            try {
+              (existingRunTab as TerminalTab).term.dispose();
+              if (isRemoteRef.current) {
+                await window.electron.ssh.closeShell(RUN_TAB_ID);
+              } else {
+                await window.electron.terminal.kill(RUN_TAB_ID);
+              }
+            } catch (e) {
+              console.error('Error closing existing run tab:', e);
+            }
+          }
+          // Update state and ref immediately for cleanup
+          const filtered = tabsRef.current.filter(t => t.id !== RUN_TAB_ID);
+          tabsRef.current = filtered;
+          setTabs(filtered);
+
+          // Small delay to allow cleanup propagation
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        // 2. Prepare Command
+        const rootPath = isRemoteRef.current ? remoteCwdRef.current : cwd;
+        const fullCommand = rootPath
+          ? `cd "${rootPath}" && ${command}`
+          : command;
+
+        // 3. Create New Run Tab via unified handler
+        await handleAddTab('default', RUN_TAB_ID, fullCommand, true);
+
+      })();
     };
 
+
+
     const handleOpenProblems = () => {
-      // Check if Problems tab exists
-      const existing = tabs.find(t => t.type === 'problems');
-      if (existing) {
-        setActiveTabId(existing.id);
-      } else {
-        // Create new Problems tab
-        const newTab: ProblemsTab = {
-          id: `problems-${Date.now()}`,
-          name: 'Problems',
-          type: 'problems'
-        };
-        setTabs(prev => [...prev, newTab]);
-        setActiveTabId(newTab.id);
-      }
+      setViewMode('problems');
     };
 
     const handleSwitchTabEvent = (e: CustomEvent<{ direction: 'prev' | 'next' }>) => {
-      if (tabs.length <= 1) return;
-      const currentIndex = tabs.findIndex(t => t.id === activeTabId);
+      const tTabs = tabs.filter(t => t.type === 'terminal') as TerminalTab[];
+      if (tTabs.length <= 1) return;
+      const currentIndex = tTabs.findIndex(t => t.id === activeTabId);
       let nextIndex: number;
       if (e.detail.direction === 'prev') {
-        nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
+        nextIndex = currentIndex > 0 ? currentIndex - 1 : tTabs.length - 1;
       } else {
-        nextIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0;
+        nextIndex = currentIndex < tTabs.length - 1 ? currentIndex + 1 : 0;
       }
-      setActiveTabId(tabs[nextIndex].id);
+      setActiveTabId(tTabs[nextIndex].id);
     };
 
     const handleCloseTabEvent = () => {
@@ -206,40 +460,6 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
     };
   }, [activeTabId, tabs, diagnostics]);
 
-  // Fit helper - fits active tab and synchronizes with backend
-  // Fit helper - fits active tab and synchronizes with backend
-  const fitTerminal = () => {
-    if (!activeTabId || !containerRef.current) return;
-    const tab = tabs.find(t => t.id === activeTabId) as TerminalTab;
-    if (!tab || tab.type !== 'terminal' || !tab.fitAddon) return;
-
-    try {
-      // Force layout reflow
-      const _ = containerRef.current.offsetHeight;
-
-      // 1. Measure and update frontend dimensions
-      tab.fitAddon.fit();
-
-      // Double check fit after a microtask
-      setTimeout(() => {
-        if (!tab.fitAddon) return;
-        tab.fitAddon.fit();
-        const { cols, rows } = tab.term;
-        if (cols > 0 && rows > 0) {
-          window.electron?.terminal?.resize(tab.id, cols, rows);
-        }
-      }, 0);
-
-      // 2. Sync with backend if dimensions are valid (Immediate)
-      const { cols, rows } = tab.term;
-      if (cols > 0 && rows > 0) {
-        window.electron?.terminal?.resize(tab.id, cols, rows);
-      }
-    } catch (e) {
-      console.warn('Fit error:', e);
-    }
-  };
-
   // ResizeObserver for Auto Fit
   useEffect(() => {
     if (!containerRef.current) return;
@@ -258,19 +478,15 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
       observer.disconnect();
       clearTimeout(timeout);
     };
-  }, [activeTabId, tabs]); // Re-bind if tabs change
+  }, [activeTabId, tabs]);
 
-  // Maximize 시 강제 리사이즈 (배치 변경 타이밍 이슈 해결을 위한 다중 트리거)
+  // Maximize 시 강제 리사이즈
   useEffect(() => {
     if (activeTabId) {
-      // Immediate
       fitTerminal();
-
-      // delayed checks for layout settlement/animation
       const t1 = setTimeout(fitTerminal, 50);
       const t2 = setTimeout(fitTerminal, 200);
       const t3 = setTimeout(fitTerminal, 500);
-
       return () => {
         clearTimeout(t1);
         clearTimeout(t2);
@@ -279,24 +495,87 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
     }
   }, [isMaximized, activeTabId]);
 
+  // Mode Switch Cleanup (Local -> Remote)
+  const prevIsRemote = useRef(isRemote);
+  useEffect(() => {
+    // If switching from Local to Remote
+    if (!prevIsRemote.current && isRemote) {
+      console.log('Switching to Remote Mode: Clearing local terminals');
+      // Force close all existing local terminals
+      tabs.forEach(tab => {
+        if (tab.type === 'terminal') {
+          try {
+            (tab as TerminalTab).term.dispose();
+            // We know these are local because prevIsRemote was false
+            window.electron.terminal.kill(tab.id);
+          } catch (e) {
+            console.error('Error closing local terminal during switch:', e);
+          }
+        }
+      });
+      setTabs([]); // This will trigger the empty-tabs effect to create a new remote tab
+      setActiveTabId(null);
+    }
+    prevIsRemote.current = isRemote;
+  }, [isRemote, tabs]);
+
+  // Project Root Change Cleanup
+  const prevCwd = useRef(cwd);
+  const prevRemoteCwd = useRef(remoteCwd);
+
+  useEffect(() => {
+    const cwdChanged = cwd !== prevCwd.current;
+    const remoteCwdChanged = isRemote && remoteCwd !== prevRemoteCwd.current;
+
+    if (cwdChanged || remoteCwdChanged) {
+      console.log('Project Root Changed: Clearing terminals');
+      tabs.forEach(tab => {
+        if (tab.type === 'terminal') {
+          try {
+            (tab as TerminalTab).term.dispose();
+            if (!isRemote) {
+              window.electron.terminal.kill(tab.id);
+            } else {
+              window.electron.ssh.closeShell(tab.id);
+            }
+          } catch (e) {
+            console.error('Error closing terminal on root change:', e);
+          }
+        }
+      });
+      setTabs([]); // This triggers empty-tabs effect -> new terminal in new CWD
+      setActiveTabId(null);
+    }
+    prevCwd.current = cwd;
+    prevRemoteCwd.current = remoteCwd;
+  }, [cwd, remoteCwd, isRemote, tabs]);
+
   // 새 터미널 탭 추가
-  const handleAddTab = async (shellType: string = 'default', customId?: string, initialCommand?: string) => {
+  const handleAddTab = async (shellType: string = 'default', customId?: string, initialCommand?: string, isRunMode: boolean = false) => {
+    // Remote mode check removed to allow multiple tabs
+
     const tabId = customId || `terminal-${Date.now()}`;
-    const shellLabel = SHELL_TYPES.find(s => s.value === shellType)?.label || 'Default';
+    const shellLabel = shellTypes.find(s => s.value === shellType)?.label || 'Default';
+
+    // Set CWD for remote mode if not provided (e.g. from F5 run)
+    let commandToRun = initialCommand;
+    if (isRemoteRef.current && !commandToRun && remoteCwdRef.current) {
+      commandToRun = `cd "${remoteCwdRef.current}" && clear`;
+    }
 
     try {
-      // xterm 인스턴스 생성
       const term = new Terminal({
         cursorBlink: true,
         fontSize: 14,
-        fontFamily: 'monospace',
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
         cursorStyle: 'bar',
+        scrollback: 1000, // Default safe value, updated from settings
         allowProposedApi: true,
         allowTransparency: true,
         theme: {
-          background: '#00000000', // Transparent for glume theme
-          foreground: '#e0e0e0', // Bright Text
-          cursor: '#29b6f6',     // Cyan Cursor
+          background: '#00000000',
+          foreground: '#e0e0e0',
+          cursor: '#29b6f6',
           cursorAccent: '#090b10',
           selectionBackground: 'rgba(41, 182, 246, 0.3)',
           black: '#090b10',
@@ -318,24 +597,31 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
         },
       });
 
+      // Load scrollback setting
+      window.electron.settings.read().then(result => {
+        if (result.success && result.data) {
+          const settings = result.data as any;
+          if (settings['terminal.integrated.scrollback']) {
+            term.options.scrollback = settings['terminal.integrated.scrollback'];
+          }
+        }
+      });
+
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
 
-      // Clipboard Addon
       const clipboardAddon = new ClipboardAddon();
       term.loadAddon(clipboardAddon);
 
-      // Escape → 에디터로 포커스 이동
       term.attachCustomKeyEventHandler((e) => {
         if (e.type === 'keydown' && e.key === 'Escape') {
           const editor = document.querySelector('.monaco-editor textarea') as HTMLElement;
           if (editor) editor.focus();
-          return false; // xterm에 이벤트 전달 안 함
+          return false;
         }
         return true;
       });
 
-      // WebGL Addon for performance
       let webglAddon: WebglAddon | undefined;
       try {
         webglAddon = new WebglAddon();
@@ -347,7 +633,6 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
         console.warn('WebGL Addon failed to load, falling back to canvas', e);
       }
 
-      // 새 탭 추가
       const newTab: TerminalTab = {
         id: tabId,
         name: customId ? `Run: ${customId.replace('run-', '').split('/').pop()}` : shellLabel,
@@ -360,14 +645,15 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
         ref: null,
       };
 
-      setTabs(prev => {
-        // Prevent duplicates if using customId
-        if (prev.some(t => t.id === tabId)) return prev;
-        return [...prev, newTab];
-      });
-      setActiveTabId(tabId);
+      // Update State & Ref IMMEDIATELY to prevent race condition
+      const nextTabs = [...tabsRef.current.filter(t => t.id !== tabId), newTab];
+      tabsRef.current = nextTabs;
+      setTabs(nextTabs);
 
-      // DOM이 렌더링된 후 터미널 초기화
+      setActiveTabId(tabId);
+      setViewMode('terminal');
+
+      // Mount logic
       setTimeout(async () => {
         const terminalElement = document.getElementById(`terminal-content-${tabId}`);
         if (terminalElement && !term.element) {
@@ -375,29 +661,78 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
           fitAddon.fit();
           term.focus();
 
-          // 리사이즈 이벤트 처리
-          term.onResize((size) => {
-            window.electron.terminal.resize(tabId, size.cols, size.rows);
-          });
+          // Resize handler
+          const handleResize = (size: { cols: number, rows: number }) => {
+            if (isRemoteRef.current) {
+              window.electron.ssh.resize(tabId, size.cols, size.rows);
+            } else {
+              window.electron.terminal.resize(tabId, size.cols, size.rows);
+            }
+          };
+          term.onResize(handleResize);
+          // Trigger initial resize sync
+          handleResize({ cols: term.cols, rows: term.rows });
 
-          // 초기 사이즈로 터미널 시작
-          const result = await window.electron.terminal.start(tabId, shellType, term.cols, term.rows, cwd);
-          if (!result.success) {
-            console.error('Failed to start terminal:', result.error);
-            term.writeln(`Failed to start terminal: ${result.error}`);
+
+          // Start Backend Process
+          if (isRunMode) {
+            // Clean Run Mode
+            // Determine execution label
+            let execLabel = 'Executing';
+            if (initialCommand?.includes('python')) execLabel = 'Executing Python';
+            else if (initialCommand?.includes('node')) execLabel = 'Executing Node.js';
+            else if (initialCommand?.includes('bash') || initialCommand?.endsWith('.sh')) execLabel = 'Executing Shell Script';
+
+            if (isRemoteRef.current) {
+              // SSH Exec Shell (Command passed directly)
+              // NOTE: For SSH exec, we pass the command. initialCommand should be the FULL command.
+              const runCmd = initialCommand || '';
+              term.writeln(`\r\n\x1b[36m${execLabel}\x1b[0m\r\n`);
+
+              const result = await window.electron.ssh.execShell(tabId, runCmd);
+              if (!result.success) term.writeln(`Error: ${result.error}`);
+            } else {
+              // Local Run (Start with initial command)
+              term.writeln(`\r\n\x1b[36m${execLabel}\x1b[0m\r\n`);
+
+              const result = await window.electron.terminal.start(tabId, shellType, term.cols, term.rows, cwd, initialCommand);
+              if (!result.success) term.writeln(`Error: ${result.error}`);
+            }
+          } else {
+            // Interactive Mode
+            if (isRemoteRef.current) {
+              const result = await window.electron.ssh.startShell(tabId);
+              if (!result.success) {
+                console.error('Failed to start SSH shell:', result.error);
+                term.writeln(`Failed to start SSH shell: ${result.error}`);
+              }
+            } else {
+              const result = await window.electron.terminal.start(tabId, shellType, term.cols, term.rows, cwd);
+              if (!result.success) {
+                console.error('Failed to start terminal:', result.error);
+                term.writeln(`Failed to start terminal: ${result.error}`);
+              }
+            }
+
+            // Run initial command via write (if standard terminal)
+            if (commandToRun) {
+              setTimeout(() => {
+                if (isRemoteRef.current) {
+                  window.electron.ssh.write(tabId, commandToRun + '\r');
+                } else {
+                  window.electron.terminal.write(tabId, commandToRun + '\r');
+                }
+              }, 800);
+            }
           }
 
-          // Initial Command Execution
-          if (initialCommand) {
-            // Wait for shell to fully initialize to prevent raw echo at the top
-            setTimeout(() => {
-              window.electron.terminal.write(tabId, initialCommand + '\r');
-            }, 800);
-          }
-
-          // 입력 이벤트 연결 - Run 탭이어도 입력은 허용 (디버깅/상호작용)
+          // Input Data Handler
           term.onData((data) => {
-            window.electron.terminal.write(tabId, data);
+            if (isRemoteRef.current) {
+              window.electron.ssh.write(tabId, data);
+            } else {
+              window.electron.terminal.write(tabId, data);
+            }
           });
         }
       }, 100);
@@ -405,71 +740,24 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
     } catch (error) {
       console.error('Failed to create terminal tab:', error);
     }
-
-
   };
 
-  // Mount 시 탭이 하나도 없으면 기본 터미널 생성 (최초 실행 시 빈 화면 방지)
+  // Mount 시 탭이 하나도 없으면 기본 터미널 생성 (항상 1개 이상 유지)
   useEffect(() => {
-    // Check inside a timeout to ensure state is settled, though empty dependency array means run once on mount.
-    // However, tabs state is initial state [] on mount.
-    // Need to strictly check if we want this behavior every time panel opens.
-    // User request: "Gluon 터미널 최초 토글시 빈 터미널 나오는데 터미널 하나 있는 상태로 띄우기"
     if (tabs.length === 0) {
-      handleAddTab('default');
+      if (isRemoteRef.current && remoteCwdRef.current) {
+        handleAddTab('default');
+      } else {
+        handleAddTab('default');
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [tabs.length]);
 
-  // ... (handleRunCommand logic moved to useEffect) ...
-  // But wait, useEffect above duplicates logic.
-  // I should remove the separate handleRunCommand useEffect if I merged it.
-  // Or keep it simple.
 
-  // 탭 닫기
-  const handleCloseTab = (tabId: string) => {
-    setTabs(prev => {
-      const filtered = prev.filter(t => t.id !== tabId);
 
-      // 활성 탭이 닫히면 다른 탭으로 전환
-      if (activeTabId === tabId && filtered.length > 0) {
-        const nextTab = filtered[filtered.length - 1];
-        setActiveTabId(nextTab.id);
-        // 남은 터미널에 포커스 유지
-        if (nextTab.type === 'terminal') {
-          setTimeout(() => (nextTab as TerminalTab).term.focus(), 50);
-        }
-      } else if (filtered.length === 0) {
-        setActiveTabId(null);
-      }
-
-      // 터미널 정리 (terminal type only)
-      const tab = prev.find(t => t.id === tabId);
-      if (tab && tab.type === 'terminal') {
-        tab.term.dispose();
-        window.electron.terminal.kill(tabId);
-      }
-
-      return filtered;
-    });
-  };
-
-  const handleSwitchTab = (tabId: string) => {
-    setActiveTabId(tabId);
-    // 터미널에 포커스 (terminal only)
-    setTimeout(() => {
-      const tab = tabs.find(t => t.id === tabId);
-      if (tab && tab.type === 'terminal') {
-        tab.fitAddon.fit();
-        tab.term.focus();
-      }
-    }, 50);
-  };
-
-  // Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, show: boolean } | null>(null);
 
-  // Close context menu on click elsewhere
   useEffect(() => {
     const handleClick = () => setContextMenu(null);
     window.addEventListener('click', handleClick);
@@ -517,161 +805,120 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
     setContextMenu(null);
   };
 
-  // Scroll State
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-  const tabsContainerRef = useRef<HTMLDivElement>(null);
-
-  // Check scroll state
-  const checkScroll = () => {
-    if (tabsContainerRef.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = tabsContainerRef.current;
-      setCanScrollLeft(scrollLeft > 1); // 1px tolerance
-      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 2); // 2px tolerance
-    }
-  };
-
-  useEffect(() => {
-    const el = tabsContainerRef.current;
-    if (!el) return;
-
-    // Initial check
-    setTimeout(checkScroll, 100);
-
-    const resizeObserver = new ResizeObserver(() => requestAnimationFrame(checkScroll));
-    resizeObserver.observe(el);
-
-    el.addEventListener('scroll', checkScroll);
-    window.addEventListener('resize', checkScroll);
-
-    return () => {
-      resizeObserver.disconnect();
-      el.removeEventListener('scroll', checkScroll);
-      window.removeEventListener('resize', checkScroll);
-    };
-  }, [tabs, isMaximized]); // Re-check on tabs or maximize change
-
-  // Scroll Helpers
-  const scrollTabs = (direction: 'left' | 'right') => {
-    if (tabsContainerRef.current) {
-      const amount = 200;
-      tabsContainerRef.current.scrollBy({ left: direction === 'left' ? -amount : amount, behavior: 'smooth' });
-    }
-  };
+  const terminalTabs = tabs.filter(t => t.type === 'terminal') as TerminalTab[];
 
   return (
     <div className={`terminal-panel ${isMaximized ? 'maximized' : ''}`} ref={containerRef}>
       {/* Header */}
       <div className="terminal-header">
-        <div className="terminal-tabs-container" style={{ display: 'flex', alignItems: 'center', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        {/* 좌측: 고정 탭 */}
+        <div className="terminal-fixed-tabs">
           <div
-            ref={tabsContainerRef}
-            className="terminal-tabs"
-            style={{ paddingRight: '4px' }}
+            className={`terminal-fixed-tab ${viewMode === 'terminal' ? 'active' : ''}`}
+            onClick={() => { setViewMode('terminal'); if (activeTabId) setTimeout(fitTerminal, 0); }}
           >
-            {tabs.map(tab => (
-              <div
-                key={tab.id}
-                className={`terminal-tab ${tab.id === activeTabId ? 'active' : ''}`}
-                onClick={() => { setActiveTabId(tab.id); setTimeout(fitTerminal, 0); }}
-                onMouseUp={(e) => { if (e.button === 1) handleCloseTab(tab.id); }}
-                data-tooltip={tab.type === 'problems' ? 'Problems' : tab.name}
-                data-tooltip-pos="top"
-              >
-                {tab.type === 'problems' ? (
-                  <ErrorIcon size={12} className="tab-icon" style={{ color: '#f07178' }} />
-                ) : (
-                  <TerminalIcon size={12} className="tab-icon" />
-                )}
-                <span className="tab-name">{tab.name}</span>
-                <button
-                  className="close-tab-btn"
-                  onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
-                >
-                  <XIcon size={12} />
-                </button>
-              </div>
-            ))}
+            <span>TERMINAL</span>
           </div>
-
-          {/* ... Navigation Buttons ... */}
-          {/* ... New Tab Buttons ... */}
-
-          <div className="tab-nav-group" style={{ display: 'flex', marginRight: '8px' }}>
-            {/* ... */}
-            <button
-              className="tab-nav-btn"
-              onClick={() => {
-                if (!activeTabId) return;
-                const idx = tabs.findIndex(t => t.id === activeTabId);
-                if (idx > 0) handleSwitchTab(tabs[idx - 1].id);
-              }}
-              title="Previous Terminal"
-            >
-              <ChevronLeftIcon size={12} />
-            </button>
-            <button
-              className="tab-nav-btn"
-              onClick={() => {
-                if (!activeTabId) return;
-                const idx = tabs.findIndex(t => t.id === activeTabId);
-                if (idx < tabs.length - 1) handleSwitchTab(tabs[idx + 1].id);
-              }}
-              title="Next Terminal"
-            >
-              <ChevronRightIcon size={12} />
-            </button>
-          </div>
-
-          <button
-            className="new-tab-btn"
-            onClick={() => handleAddTab('default')}
-            data-tooltip="New Terminal"
-            data-tooltip-pos="top"
-            style={{ borderRadius: '4px', width: '28px' }}
+          <div
+            className={`terminal-fixed-tab ${viewMode === 'problems' ? 'active' : ''}`}
+            onClick={() => setViewMode('problems')}
           >
-            <PlusCircleIcon size={14} />
-          </button>
-
+            <span>PROBLEMS</span>
+            {(diagnostics.errors > 0 || diagnostics.warnings > 0) && (
+              <span className="problems-badge">
+                {diagnostics.errors + diagnostics.warnings}
+              </span>
+            )}
+          </div>
         </div>
-        {/* Actions */}
-        <div className="terminal-actions">
-          {/* ... */}
+
+        {/* 우측: 액션 */}
+        <div className="terminal-header-actions">
+          {viewMode === 'terminal' && (
+            <div style={{ position: 'relative' }} className="shell-dropdown-trigger">
+              <button
+                className="action-btn"
+                onClick={() => setIsShellDropdownOpen(!isShellDropdownOpen)}
+              >
+                <PlusCircleIcon size={14} />
+              </button>
+              {isShellDropdownOpen && (
+                <div className="shell-dropdown-menu">
+                  {shellTypes.map(shell => (
+                    <div
+                      key={shell.value}
+                      className="shell-dropdown-item"
+                      onClick={() => {
+                        handleAddTab(shell.value);
+                        setIsShellDropdownOpen(false);
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {(() => {
+                          const name = shell.label.toLowerCase();
+                          if (name.includes('bash')) return <BashIcon size={13} />;
+                          if (name.includes('zsh')) return <ZshIcon size={13} />;
+                          if (name.includes('tmux')) return <TmuxIcon size={13} />;
+                          if (name.includes('powershell') || name.includes('pwsh')) return <PowerShellIcon size={13} />;
+                          return <TerminalIcon size={13} />;
+                        })()}
+                        {shell.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 공통 액션 */}
           {onMaximize && (
-            <button className="action-btn" onClick={onMaximize} title={isMaximized ? "Restore" : "Maximize"}>
+            <button className="action-btn" onClick={onMaximize}>
               {isMaximized ? <ChevronDownIcon size={14} /> : <ChevronUpIcon size={14} />}
             </button>
           )}
           {onClose && (
-            <button className="action-btn close-btn" onClick={onClose} title="Close Panel">
+            <button className="action-btn close-btn" onClick={onClose}>
               <XIcon size={14} />
             </button>
           )}
         </div>
       </div>
 
-      {/* Terminal Content or Problems Content */}
+      {/* Terminal Content Body */}
       <div className="terminal-body" onContextMenu={handleContextMenu}>
-        {tabs.map(tab => (
-          tab.type === 'terminal' ? (
+        {/* Main Content Area */}
+        <div className="terminal-content-area" style={{ flex: 1, height: '100%', overflow: 'hidden', position: 'relative' }}>
+          {/* Terminal Instances */}
+          {terminalTabs.map(tab => (
             <div
               key={tab.id}
               id={`terminal-content-${tab.id}`}
               className="terminal-instance"
               style={{
-                display: tab.id === activeTabId ? 'block' : 'none',
+                display: viewMode === 'terminal' && tab.id === activeTabId ? 'block' : 'none',
                 height: '100%',
                 width: '100%'
               }}
             />
-          ) : (
+          ))}
+
+          {/* Empty State */}
+          {viewMode === 'terminal' && terminalTabs.length === 0 && (
+            <div className="terminal-empty">
+              <p>No open terminals</p>
+              <button onClick={() => handleAddTab('default')}>Open New Terminal</button>
+            </div>
+          )}
+
+          {/* Problems View */}
+          {viewMode === 'problems' && (
             <div
-              key={tab.id}
               className="problems-view"
               style={{
-                display: tab.id === activeTabId ? 'flex' : 'none',
                 height: '100%',
                 width: '100%',
+                display: 'flex',
                 flexDirection: 'column',
                 padding: '16px',
                 overflowY: 'auto',
@@ -685,7 +932,6 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
                 <WarningIcon size={16} color="#ffcb6b" />
                 <span style={{ fontWeight: 'bold' }}>{diagnostics.warnings} Warnings</span>
               </div>
-              {/* Placeholder for list */}
               <div className="problems-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {diagnostics.markers && diagnostics.markers.length > 0 ? (
                   diagnostics.markers.map((marker, idx) => (
@@ -696,7 +942,7 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
                         background: 'var(--bg-secondary)',
                         padding: '8px 12px',
                         borderRadius: '4px',
-                        borderLeft: `3px solid ${marker.severity === 8 ? '#f07178' : '#ffcb6b'}`, // 8 is Error in Monaco
+                        borderLeft: `3px solid ${marker.severity === 8 ? '#f07178' : '#ffcb6b'}`,
                         cursor: 'pointer'
                       }}
                     >
@@ -720,16 +966,66 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
                 )}
               </div>
             </div>
-          )
-        ))}
+          )}
+        </div>
 
-        {tabs.length === 0 && (
-          <div className="terminal-empty">
-            <p>No terminals open</p>
-            <button onClick={() => handleAddTab('default')}>Open Terminal</button>
+        {/* Sidebar (Right) - Only visible in Terminal Mode */}
+        {viewMode === 'terminal' && terminalTabs.length > 0 && (
+          <div
+            className={`terminal-sidebar ${sidebarWidth < 100 ? 'collapsed' : ''}`}
+            style={{ width: sidebarWidth }}
+          >
+            <div
+              className="sidebar-resizer"
+              onMouseDown={startResizing}
+            />
+            <div className="sidebar-list">
+              {terminalTabs.map(tab => (
+                <div
+                  key={tab.id}
+                  className={`sidebar-item ${tab.id === activeTabId ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveTabId(tab.id);
+                    setTimeout(fitTerminal, 0);
+                  }}
+                  title={tab.name}
+                >
+                  <div className="sidebar-item-icon">
+                    {(() => {
+                      const name = tab.name.toLowerCase();
+                      if (name.includes('bash')) return <BashIcon size={13} />;
+                      if (name.includes('zsh')) return <ZshIcon size={13} />;
+                      if (name.includes('tmux')) return <TmuxIcon size={13} />;
+                      if (name.includes('powershell') || name.includes('pwsh')) return <PowerShellIcon size={13} />;
+                      return <TerminalIcon size={13} />;
+                    })()}
+                  </div>
+                  {sidebarWidth >= 100 && (
+                    <>
+                      <span className="sidebar-item-name">{tab.name}</span>
+                      <div className="sidebar-item-actions">
+                        {terminalTabs.length > 1 && (
+                          <button
+                            className="sidebar-action-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCloseTab(tab.id);
+                            }}
+                            title="Kill Terminal"
+                          >
+                            <XIcon size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
+
       {/* Context Menu */}
       {contextMenu && contextMenu.show && (
         <div
@@ -742,7 +1038,7 @@ function TerminalPanel({ onClose, onMaximize, isMaximized, cwd, diagnostics = { 
           <div className="context-menu-item" onClick={handleClear}>Clear</div>
         </div>
       )}
-    </div >
+    </div>
   );
 }
 

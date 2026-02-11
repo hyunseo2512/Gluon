@@ -9,7 +9,7 @@ class QuarkApi {
   private client: AxiosInstance;
   private baseURL: string;
 
-  constructor(baseURL: string = 'https://quark.panthera-karat.ts.net:8000') {
+  constructor(baseURL: string = 'http://100.110.157.32:9000') {
     this.baseURL = baseURL;
     this.client = axios.create({
       baseURL,
@@ -81,7 +81,8 @@ class QuarkApi {
     signal?: AbortSignal,
     mode?: string,
     cwd?: string,
-    systemPrompt?: string
+    systemPrompt?: string,
+    history?: any[]
   ): AsyncGenerator<string, void, unknown> {
     const storeUrl = useAuthStore.getState().backendUrl || this.baseURL;
     const token = useAuthStore.getState().token;
@@ -95,7 +96,8 @@ class QuarkApi {
         model,
         mode,
         cwd,
-        system_prompt: systemPrompt
+        system_prompt: systemPrompt,
+        history
       };
       const headers = {
         'Content-Type': 'application/json',

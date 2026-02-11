@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { useAuthStore } from '../store/authStore';
 import '../styles/WelcomeScreen.css';
 import { FolderPlusIcon, GitIcon, ActivityIcon, UserIcon, XIcon } from './Icons';
 
@@ -7,6 +8,8 @@ interface WelcomeScreenProps {
     onCloneRepo: () => void;
     onConnectSSH: () => void;
     onLogin: () => void;
+    isRemote?: boolean;
+    remoteUser?: string;
     recents?: string[];
     onOpenRecent?: (path: string) => void;
     onRemoveRecent?: (path: string) => void;
@@ -17,15 +20,18 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     onCloneRepo,
     onConnectSSH,
     onLogin,
+    isRemote = false,
+    remoteUser = '',
     recents = [],
     onOpenRecent,
     onRemoveRecent
 }) => {
+    const { user } = useAuthStore();
     const containerRef = useRef<HTMLDivElement>(null);
-    const [focusIndex, setFocusIndex] = React.useState(0);
+    const [focusIndex, setFocusIndex] = useState(0);
 
-    // 포커스 가능한 항목 수: 카드 3개 + recent 프로젝트
-    const totalItems = 3 + Math.min(recents.length, 3);
+    // 레퍼런트 포커스 계산: isRemote일 때는 recent 제외
+    const totalItems = 3 + (isRemote ? 0 : Math.min(recents.length, 3));
 
     // 항목에 포커스 맞추기
     const focusItem = useCallback((index: number) => {
@@ -81,7 +87,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     return (
         <div className="welcome-screen" ref={containerRef} onKeyDown={handleKeyDown}>
             <div className="welcome-content">
-                <div className="welcome-logo">
+                <div className={`welcome-logo ${user?.role === 'root' ? 'root' : ''}`}>
                     <h1>Gluon</h1>
                     <span className="welcome-version">Pro • v1.0.0</span>
                 </div>
@@ -119,61 +125,64 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                     </button>
 
                     <button
-                        className="welcome-action-card"
+                        className={`welcome-action-card${isRemote ? ' connected' : ''}`}
                         onClick={onConnectSSH}
                         data-welcome-item="2"
                         onFocus={() => setFocusIndex(2)}
+                        style={isRemote ? { borderColor: '#a6e3a1', boxShadow: '0 0 12px rgba(166, 227, 161, 0.2)' } : {}}
                     >
-                        <div className="action-icon">
+                        <div className="action-icon" style={isRemote ? { color: '#a6e3a1' } : {}}>
                             <ActivityIcon size={24} />
                         </div>
                         <div className="action-text">
-                            <h3>Connect via SSH</h3>
-                            <p>Connect to a remote server</p>
+                            <h3>{isRemote ? `Connected: ${remoteUser}` : 'Connect via SSH'}</h3>
+                            <p>{isRemote ? 'Click to disconnect' : 'Connect to a remote server'}</p>
                         </div>
                     </button>
                 </div>
 
-                <div className="recent-projects">
-                    <h3>Recent Projects</h3>
-                    <div className="recent-list">
-                        {recents.length === 0 ? (
-                            <p className="no-recent">No recent projects</p>
-                        ) : (
-                            recents.slice(0, 3).map((path, index) => (
-                                <div
-                                    key={index}
-                                    className="recent-item"
-                                    onClick={() => onOpenRecent && onOpenRecent(path)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                            e.preventDefault();
-                                            onOpenRecent && onOpenRecent(path);
-                                        }
-                                    }}
-                                    title={path}
-                                    tabIndex={0}
-                                    data-welcome-item={3 + index}
-                                    onFocus={() => setFocusIndex(3 + index)}
-                                    role="button"
-                                >
-                                    <span className="recent-name">{path.split('/').pop()}</span>
-                                    <button
-                                        className="recent-remove"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onRemoveRecent && onRemoveRecent(path);
+                {!isRemote && (
+                    <div className="recent-projects">
+                        <h3>Recent Projects</h3>
+                        <div className="recent-list">
+                            {recents.length === 0 ? (
+                                <p className="no-recent">No recent projects</p>
+                            ) : (
+                                recents.slice(0, 3).map((path, index) => (
+                                    <div
+                                        key={index}
+                                        className="recent-item"
+                                        onClick={() => onOpenRecent && onOpenRecent(path)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
+                                                onOpenRecent && onOpenRecent(path);
+                                            }
                                         }}
-                                        tabIndex={-1}
-                                        title="Remove from history"
+                                        title={path}
+                                        tabIndex={0}
+                                        data-welcome-item={3 + index}
+                                        onFocus={() => setFocusIndex(3 + index)}
+                                        role="button"
                                     >
-                                        <XIcon size={14} />
-                                    </button>
-                                </div>
-                            ))
-                        )}
+                                        <span className="recent-name">{path.split('/').pop()}</span>
+                                        <button
+                                            className="recent-remove"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onRemoveRecent && onRemoveRecent(path);
+                                            }}
+                                            tabIndex={-1}
+                                            title="Remove from history"
+                                        >
+                                            <XIcon size={14} />
+                                        </button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
         </div>
     );

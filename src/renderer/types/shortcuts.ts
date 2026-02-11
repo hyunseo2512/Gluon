@@ -52,6 +52,13 @@ export const DEFAULT_SHORTCUTS: KeyBinding[] = [
         currentKey: 'Ctrl+N'
     },
     {
+        id: 'file.newWindow',
+        command: 'newWindow',
+        description: 'New Window',
+        defaultKey: 'Ctrl+Shift+N',
+        currentKey: 'Ctrl+Shift+N'
+    },
+    {
         id: 'file.open',
         command: 'openFile',
         description: 'Open File',

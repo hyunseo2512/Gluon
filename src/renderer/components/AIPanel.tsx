@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 import { ChatMessage } from '../types';
 import QuarkApi from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { SendIcon, LoaderIcon, PaperclipIcon, MicIcon, HistoryIcon, PlusIcon, ChevronUpIcon, ChevronDownIcon, ChatBubbleIcon, InfinityIcon, RotateCcwIcon, TrashIcon } from './Icons';
+import { SendIcon, PaperclipIcon, MicIcon, HistoryIcon, PlusIcon, ChevronUpIcon, ChevronDownIcon, ChatBubbleIcon, InfinityIcon, RotateCcwIcon, TrashIcon } from './Icons';
 import MarkdownRenderer from './MarkdownRenderer';
+import DiffView from './DiffView';
 import '../styles/AIPanel.css';
 
 interface AIPanelProps {
@@ -12,6 +13,7 @@ interface AIPanelProps {
   projectName?: string;
   workspacePath?: string;
   onFileSystemChange?: () => void;
+  onCloseFile?: (filePath: string) => void;
 }
 
 interface ChatSession {
@@ -23,7 +25,7 @@ interface ChatSession {
 /**
  * AI 에이전트 패널 (Ctrl+L로 토글)
  */
-function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemChange }: AIPanelProps) {
+function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemChange, onCloseFile }: AIPanelProps) {
   const { user } = useAuthStore();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -42,9 +44,11 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
   // Dropdown state for floating menu
   const [activeDropdown, setActiveDropdown] = useState<'mode' | 'model' | null>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+  const [selectedDiff, setSelectedDiff] = useState<{ path: string, original: string, modified: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeAssistantIdRef = useRef<string | null>(null);
 
   // 로딩 경과 시간 (초)
   const [loadingSeconds, setLoadingSeconds] = useState(0);
@@ -62,6 +66,14 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
       if (timer) clearInterval(timer);
     };
   }, [isLoading]);
+
+  // Handle Logout: Clear messages if user logs out
+  useEffect(() => {
+    if (!user) {
+      setMessages([]);
+      setSessionId(Date.now().toString());
+    }
+  }, [user]);
 
   // Initialize Chat & Migrate
   useEffect(() => {
@@ -267,7 +279,7 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
   };
   useEffect(() => { scrollToBottom(); }, [messages]);
 
-  const handleSend = async (textOverride?: string) => {
+  const handleSend = async (textOverride?: string, hidden: boolean = false) => {
     if (isLoading) {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -279,14 +291,16 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
     const textToSend = textOverride || input;
     if (!textToSend.trim()) return;
 
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: textToSend,
-      timestamp: new Date(),
-    };
+    if (!hidden) {
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: textToSend,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, userMessage]);
+    }
 
-    setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
 
@@ -294,6 +308,7 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
     abortControllerRef.current = abortController;
 
     const assistantMessageId = (Date.now() + 1).toString();
+    activeAssistantIdRef.current = assistantMessageId;
 
     try {
       const initialAssistantMessage: ChatMessage = {
@@ -321,7 +336,12 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
         } catch (err) { console.warn('Failed to load rules', err); }
       }
 
-      for await (const chunk of QuarkApi.chatStream(textToSend, selectedModel, abortController.signal, aiMode, workspacePath, systemPrompt)) {
+      // Filter history: only user and assistant, remove internal fields if needed
+      const history = messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role, content: m.content }));
+
+      for await (const chunk of QuarkApi.chatStream(textToSend, selectedModel, abortController.signal, aiMode, workspacePath, systemPrompt, history)) {
         fullContent += chunk;
         setMessages((prev) => prev.map(msg => msg.id === assistantMessageId ? { ...msg, content: fullContent } : msg));
       }
@@ -335,17 +355,23 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
         };
         setMessages((prev) => [...prev, errorMessage]);
       } else {
-        setMessages((prev) => prev.map(msg => msg.id === assistantMessageId && !msg.content ? { ...msg, content: '_(Generation cancelled)_' } : msg));
+        // Abort: remove empty messages, mark partial ones as cancelled
+        setMessages((prev) => prev
+          .filter(msg => !(msg.id === assistantMessageId && !msg.content?.trim()))
+          .map(msg => msg.id === assistantMessageId && msg.content?.trim()
+            ? { ...msg, content: msg.content + '\n\n_(생성 중단됨)_' }
+            : msg
+          ));
       }
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
+      activeAssistantIdRef.current = null;
       if (onFileSystemChange) onFileSystemChange();
 
-      setMessages((prev) => prev.map(msg =>
-        msg.id === assistantMessageId && !msg.content
-          ? { ...msg, content: '_(No response)_' }
-          : msg
+      // Remove any remaining empty assistant messages
+      setMessages((prev) => prev.filter(msg =>
+        !(msg.id === assistantMessageId && !msg.content?.trim())
       ));
     }
   };
@@ -363,9 +389,98 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
   };
 
   const handleApproveAction = (toolName: string) => {
-    // Send a system-like message or user confirmation invisible to the history? 
-    // For simplicity, send a user message "Approved".
-    handleSend(`Approved to run ${toolName}`);
+    let pendingJson = '';
+
+    // 1. Update UI: Remove the approval button from the latest assistant message
+    setMessages(prev => {
+      const newMessages = [...prev];
+      for (let i = newMessages.length - 1; i >= 0; i--) {
+        if (newMessages[i].role === 'assistant' && newMessages[i].content?.includes(`[[APPROVE_ACTION:${toolName}]]`)) {
+
+          // Extract PENDING JSON if exists
+          const match = newMessages[i].content?.match(/<!-- PENDING:(.*?) -->/);
+          if (match) {
+            try {
+              const b64 = match[1];
+              pendingJson = atob(b64);
+            } catch (e) {
+              console.error("Failed to decode pending action", e);
+            }
+          }
+
+          // Clean up the message: remove PENDING comment + replace approval tag with styled marker
+          let cleaned = newMessages[i].content || '';
+          cleaned = cleaned.replace(/<!--\s*PENDING:[^>]*-->\n?/g, '');  // Strip PENDING comment
+          cleaned = cleaned.replace(
+            new RegExp(`\\[\\[APPROVE_ACTION:${toolName}\\]\\]`, 'g'),
+            '[[APPROVED]]'
+          );
+          newMessages[i] = { ...newMessages[i], content: cleaned };
+          break;
+        }
+      }
+      return newMessages;
+    });
+
+    // 2. Send hidden message to server
+    if (pendingJson) {
+      handleSend(`Approved. Execute this tool JSON immediately:\n\`\`\`json\n${pendingJson}\n\`\`\``, true);
+    } else {
+      handleSend(`Approved to run ${toolName}`, true);
+    }
+  };
+
+  const handleAcceptFile = async (_fullPath: string, contentB64?: string, relativePath?: string) => {
+    // Write file content locally (essential for remote clients, harmless for local)
+    if (contentB64 && relativePath && workspacePath) {
+      try {
+        const fileContent = atob(contentB64);
+        const localPath = `${workspacePath}/${relativePath}`;
+        await window.electron.fs.writeFile(localPath, fileContent);
+      } catch (err) {
+        console.error('Failed to write file locally:', err);
+      }
+    }
+    if (onFileSystemChange) onFileSystemChange();
+  };
+
+  const handleRejectFile = async (fullPath: string, backup: string, isNew: boolean) => {
+    try {
+      if (isNew) {
+        // New file → delete it and close its tab
+        await window.electron.fs.delete(fullPath);
+        if (onCloseFile) onCloseFile(fullPath);
+      } else if (backup) {
+        // Modified file → restore original from base64 backup
+        const originalContent = atob(backup);
+        await window.electron.fs.writeFile(fullPath, originalContent);
+      }
+      if (onFileSystemChange) onFileSystemChange();
+    } catch (err) {
+      console.error('Failed to reject file change:', err);
+    }
+  };
+
+  const handleViewDiff = async (fullPath: string) => {
+    if (!workspacePath) return;
+    try {
+      // Calculate relative path for git command
+      const relativePath = fullPath.startsWith(workspacePath)
+        ? fullPath.replace(workspacePath, '').replace(/^\//, '') // Remove leading slash
+        : fullPath;
+
+      const [diffResult, fileResult] = await Promise.all([
+        window.electron.git.diff(workspacePath, relativePath),
+        window.electron.fs.readFile(fullPath)
+      ]);
+
+      const original = diffResult.success ? diffResult.original : '';
+      const modified = fileResult.success ? (fileResult.content || '') : '';
+
+      setSelectedDiff({ path: relativePath, original, modified });
+    } catch (err) {
+      console.error('Failed to diff file:', err);
+    }
   };
 
   const renderFloatingDropdown = () => {
@@ -411,6 +526,35 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
   };
 
   const renderInputArea = () => {
+    // [RESTRICTION] Block 'user' role
+    if (user?.role === 'user') {
+      return (
+        <div className="ai-input-area" style={{ borderTop: 'none', padding: '0', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '200px' }}>
+          <div style={{
+            textAlign: 'center',
+            padding: '24px',
+            border: '1px solid var(--border-color)',
+            borderRadius: '12px',
+            background: 'var(--bg-secondary)',
+            maxWidth: '400px',
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <h3 style={{
+              fontSize: '15px',
+              fontWeight: '600',
+              color: 'var(--text-primary)',
+              margin: 0
+            }}>
+              승인 대기중 (Waiting for Approval)
+            </h3>
+          </div>
+        </div>
+      );
+    }
+
     const isInitial = messages.length === 0;
     const DropdownIcon = isInitial ? ChevronDownIcon : ChevronUpIcon;
     return (
@@ -457,11 +601,7 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
     );
   };
 
-  let displayTitle = projectName;
-  if (!projectName || projectName === 'Gluon') {
-    if (user) { displayTitle = `무엇을 도와드릴까요, ${user.full_name || user.email?.split('@')[0] || 'User'}님?`; }
-    else { displayTitle = "Quark AI를 사용하려면\n로그인이 필요합니다"; }
-  }
+
 
   // Header Logic
   let headerTitle = "";
@@ -575,14 +715,16 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
             <div style={{ width: '100%', maxWidth: '600px' }}>
               {user ? (
                 <>
-                  <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-                    <h2 className="hello-greeting">
-                      Hello, {user.full_name?.split(' ')[0] || 'Captain'}
-                    </h2>
-                    <p style={{ color: 'var(--text-secondary)', marginTop: '8px', fontSize: '14px' }}>
-                      How can I facilitate your coding journey?
-                    </p>
-                  </div>
+                  {user.role !== 'user' && (
+                    <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+                      <h2 className={`hello-greeting ${user.role === 'root' ? 'root-anim' : ''}`}>
+                        Hello, {user.full_name?.split(' ')[0] || 'Captain'}
+                      </h2>
+                      <p style={{ color: 'var(--text-secondary)', marginTop: '8px', fontSize: '14px' }}>
+                        How can I facilitate your coding journey?
+                      </p>
+                    </div>
+                  )}
                   {renderInputArea()}
                 </>
               ) : (
@@ -611,29 +753,41 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
           // Active Chat Layout
           <>
             <div className="ai-messages">
-              {messages.map((message) => (
-                <div key={message.id} className={`ai-message ai-message-${message.role}`}>
-                  {message.role === 'assistant' && !message.content && isLoading ? (
-                    <div className="ai-message-content ai-thinking-wave">
-                      <span className="wave-dot"></span>
-                      <span className="wave-dot"></span>
-                      <span className="wave-dot"></span>
-                      <span className="loading-timer">{loadingSeconds}s</span>
-                    </div>
-                  ) : (
-                    <div className="ai-message-content group">
-                      <MarkdownRenderer
-                        content={message.content || ''}
-                        onRunCode={!isLoading && aiMode === 'Agent' ? handleRunCode : undefined}
-                        onApprove={!isLoading ? handleApproveAction : undefined}
-                      />
-                      {message.role === 'user' && !isLoading && (
-                        <button className="resend-button" onClick={() => handleSend(message.content)} title="Resend"><RotateCcwIcon size={12} /></button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+              {messages.map((message) => {
+                // Skip empty assistant messages (stale from cancellation)
+                if (message.role === 'assistant' && !message.content?.trim() && message.id !== activeAssistantIdRef.current) return null;
+                return (
+                  <div key={message.id} className={`ai-message ai-message-${message.role}`}>
+                    {message.role === 'assistant' && !message.content && isLoading && message.id === activeAssistantIdRef.current ? (
+                      <div className="ai-message-content ai-thinking-wave">
+                        <span className="wave-dot"></span>
+                        <span className="wave-dot"></span>
+                        <span className="wave-dot"></span>
+                        <span className="loading-timer">thinking {loadingSeconds}s</span>
+                      </div>
+                    ) : (
+                      <div className="ai-message-content group">
+                        <MarkdownRenderer
+                          content={message.content || ''}
+                          onRunCode={!isLoading && aiMode === 'Agent' ? handleRunCode : undefined}
+                          onApprove={!isLoading ? handleApproveAction : undefined}
+                          onAcceptFile={handleAcceptFile}
+                          onRejectFile={handleRejectFile}
+                          onUpdateContent={(newContent: string) => {
+                            setMessages(prev => prev.map(msg =>
+                              msg.id === message.id ? { ...msg, content: newContent } : msg
+                            ));
+                          }}
+                          onViewDiff={handleViewDiff}
+                        />
+                        {message.role === 'user' && !isLoading && (
+                          <button className="resend-button" onClick={() => handleSend(message.content)} title="Resend"><RotateCcwIcon size={12} /></button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <div ref={messagesEndRef} />
             </div>
             {renderInputArea()}
@@ -653,6 +807,41 @@ function AIPanel({ onClose, projectName = 'Gluon', workspacePath, onFileSystemCh
             <div className="modal-actions" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '16px' }}>
               <button className="modal-btn cancel" onClick={() => setDeleteSessionId(null)}>취소</button>
               <button className="modal-btn delete" onClick={doDeleteSession}>삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedDiff && (
+        <div className="modal-overlay" style={{ zIndex: 99999 }} onClick={() => setSelectedDiff(null)}>
+          <div className="git-diff-content" onClick={e => e.stopPropagation()} style={{
+            width: '90vw',
+            height: '90vh',
+            maxWidth: 'none',
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+            display: 'flex',
+            flexDirection: 'column',
+            borderRadius: '6px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
+          }}>
+            <div className="git-diff-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '10px 16px',
+              borderBottom: '1px solid var(--border-color)',
+              background: 'var(--bg-secondary)'
+            }}>
+              <h4 style={{ margin: 0, fontSize: '14px' }}>{selectedDiff.path}</h4>
+              <button onClick={() => setSelectedDiff(null)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: '16px', cursor: 'pointer' }}>✕</button>
+            </div>
+            <div className="git-diff-body" style={{ flex: 1, padding: 0, overflow: 'hidden' }}>
+              <DiffView
+                original={selectedDiff.original}
+                modified={selectedDiff.modified}
+                language={selectedDiff.path.split('.').pop() || 'text'}
+              />
             </div>
           </div>
         </div>

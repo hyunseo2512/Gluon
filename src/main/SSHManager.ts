@@ -18,9 +18,9 @@ interface FileInfo {
 
 export class SSHManager {
     private client: Client;
-    private stream: ClientChannel | null = null;
+    private streams: Map<string, ClientChannel> = new Map();
     private sftp: SFTPWrapper | null = null;
-    private config: SSHConfig | null = null;
+
     private currentRemotePath: string = '/';
 
     constructor() {
@@ -28,7 +28,6 @@ export class SSHManager {
     }
 
     connect(config: SSHConfig): Promise<void> {
-        this.config = config;
         return new Promise((resolve, reject) => {
             this.client.on('ready', () => {
                 console.log('SSH Connection Ready');
@@ -38,7 +37,7 @@ export class SSHManager {
                 reject(err);
             }).on('end', () => {
                 console.log('SSH Connection Ended');
-                this.stream = null;
+                this.streams.clear();
                 this.sftp = null;
             });
 
@@ -47,16 +46,16 @@ export class SSHManager {
                 port: config.port,
                 username: config.username,
                 password: config.password,
-                privateKey: config.privateKey
+                privateKey: config.privateKey,
+                readyTimeout: 60000,
+                keepaliveInterval: 10000,
             });
         });
     }
 
     disconnect() {
-        if (this.stream) {
-            this.stream.close();
-            this.stream = null;
-        }
+        this.streams.forEach(stream => stream.close());
+        this.streams.clear();
         if (this.sftp) {
             this.sftp.end();
             this.sftp = null;
@@ -64,35 +63,66 @@ export class SSHManager {
         this.client.end();
     }
 
-    startShell(onData: (data: string) => void, onExit: () => void): Promise<void> {
+    startShell(terminalId: string, onData: (data: string) => void, onExit: (code: number) => void): Promise<void> {
         return new Promise((resolve, reject) => {
             this.client.shell((err, stream) => {
                 if (err) return reject(err);
-
-                this.stream = stream;
-
-                stream.on('close', () => {
-                    console.log('Stream :: close');
-                    this.stream = null;
-                    onExit();
-                }).on('data', (data: any) => {
-                    onData(data.toString());
-                });
-
+                this._setupStream(terminalId, stream, onData, onExit);
+                console.log(`SSHManager: Started shell for ${terminalId}`);
                 resolve();
             });
         });
     }
 
-    write(data: string) {
-        if (this.stream) {
-            this.stream.write(data);
+    startShellWithCommand(terminalId: string, command: string, onData: (data: string) => void, onExit: (code: number) => void): Promise<void> {
+        return new Promise((resolve, reject) => {
+            // Execute command directly without dropping to shell
+            // User requested output-only mode
+            this.client.exec(command, { pty: true }, (err, stream) => {
+                if (err) return reject(err);
+                this._setupStream(terminalId, stream, onData, onExit);
+                console.log(`SSHManager: Started exec-shell for ${terminalId}`);
+                resolve();
+            });
+        });
+    }
+
+    private _setupStream(terminalId: string, stream: ClientChannel, onData: (data: string) => void, onExit: (code: number) => void) {
+        this.streams.set(terminalId, stream);
+
+        stream.on('close', () => {
+            console.log(`Stream ${terminalId} :: close`);
+            this.streams.delete(terminalId);
+            // Default exit code 0 if not captured, but usually 'exit' event fires before close
+        }).on('data', (data: any) => {
+            onData(data.toString());
+        }).on('exit', (code: any, signal: any) => {
+            console.log(`Stream ${terminalId} :: exit :: code: ${code}, signal: ${signal}`);
+            onExit(typeof code === 'number' ? code : 0);
+        });
+    }
+
+    write(terminalId: string, data: string) {
+        const stream = this.streams.get(terminalId);
+        if (stream) {
+            stream.write(data);
+        } else {
+            console.warn(`SSHManager: Stream not found for ${terminalId}`);
         }
     }
 
-    resize(cols: number, rows: number) {
-        if (this.stream) {
-            this.stream.setWindow(rows, cols, 0, 0);
+    resize(terminalId: string, cols: number, rows: number) {
+        const stream = this.streams.get(terminalId);
+        if (stream) {
+            stream.setWindow(rows, cols, 0, 0);
+        }
+    }
+
+    closeShell(terminalId: string) {
+        const stream = this.streams.get(terminalId);
+        if (stream) {
+            stream.close();
+            this.streams.delete(terminalId);
         }
     }
 

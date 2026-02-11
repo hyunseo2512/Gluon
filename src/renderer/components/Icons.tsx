@@ -396,6 +396,26 @@ export const ChevronRightIcon = ({ size = 16, className = '' }: IconProps) => (
   </svg>
 );
 
+// 이동(Move)용 왼쪽 화살표
+export const ArrowLeftIcon = ({ size = 16, className = '' }: IconProps) => (
+  <MatIcon Icon={MdArrowBack} size={size} className={className} />
+);
+
+// 이동(Move)용 오른쪽 화살표
+export const ArrowRightIcon = ({ size = 16, className = '' }: IconProps) => (
+  <MatIcon Icon={MdArrowForward} size={size} className={className} />
+);
+
+// 분할(Split) 아이콘
+export const SplitIcon = ({ size = 16, className = '' }: IconProps) => (
+  <MatIcon Icon={MdVerticalSplit} size={size} className={className} />
+);
+
+// 단일(Single) 아이콘 (또는 닫기/병합 의미) -> 사각형 or Close
+export const SingleIcon = ({ size = 16, className = '' }: IconProps) => (
+  <MatIcon Icon={MdCheckBoxOutlineBlank} size={size} className={className} />
+);
+
 // Import Simple Icons
 import {
   siJavascript,
@@ -409,6 +429,9 @@ import {
   siGithub,
   siGradle,
   siGnubash,
+  siZsh,
+  siTmux,
+
   siJson,
   siMarkdown,
   siDocker,
@@ -443,6 +466,10 @@ import {
   MdCloudUpload,
   MdCloudDownload,
   MdExtension,
+  MdArrowBack,
+  MdArrowForward,
+  MdVerticalSplit,
+  MdCheckBoxOutlineBlank,
 } from 'react-icons/md';
 
 import {
@@ -633,6 +660,22 @@ export const JavaIcon = ({ size = 16, className = '' }: IconProps) => (
 // Bash/Shell Icon
 export const BashIcon = ({ size = 16, className = '' }: IconProps) => (
   <SimpleIcon icon={siGnubash} size={size} className={className} />
+);
+
+
+// Zsh Icon
+export const ZshIcon = ({ size = 16, className = '' }: IconProps) => (
+  <SimpleIcon icon={siZsh} size={size} className={className} />
+);
+
+// Tmux Icon
+export const TmuxIcon = ({ size = 16, className = '' }: IconProps) => (
+  <SimpleIcon icon={siTmux} size={size} className={className} color="#1BB91F" />
+);
+
+// PowerShell Icon
+export const PowerShellIcon = ({ size = 16, className = '' }: IconProps) => (
+  <TerminalIcon size={size} className={className} />
 );
 
 // JSON Icon ({} 중괄호 스타일, 노란색) - Lucide Braces

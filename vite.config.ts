@@ -37,8 +37,8 @@ export default defineConfig({
     port: 3001,
     strictPort: true, // 포트가 사용 중이면 에러, 다른 포트 사용 안함
     fs: {
-      // monaco-editor의 node_modules 접근 허용
-      allow: ['..'],
+      // monaco-editor의 node_modules 접근 허용 (root가 src/renderer이므로 ../..로 프로젝트 루트 접근)
+      allow: ['../..'],
     },
   },
 });

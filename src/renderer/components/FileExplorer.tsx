@@ -5,6 +5,7 @@ import ConfirmModal from './ConfirmModal';
 
 interface FileExplorerProps {
   workspaceDir: string | null;
+  isRemote?: boolean;
   onFileOpen: (filePath: string) => void;
   onCloseProject?: () => void;
   refreshKey?: number;
@@ -25,7 +26,7 @@ interface FileNode {
 /**
  * 파일 탐색기 컴포넌트 - 실제 파일 시스템 연동
  */
-function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, onFileDelete, revealFilePath, onRevealComplete }: FileExplorerProps) {
+function FileExplorer({ workspaceDir, isRemote = false, onFileOpen, onCloseProject, refreshKey, onFileDelete, revealFilePath, onRevealComplete }: FileExplorerProps) {
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null); // For range selection or context
@@ -597,9 +598,17 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
 
     try {
       if (isCreating.type === 'file') {
-        await window.electron.fs.createFile(fullPath, '');
+        if (isRemote) {
+          await window.electron.sftp.write(fullPath, '');
+        } else {
+          await window.electron.fs.createFile(fullPath, '');
+        }
       } else {
-        await window.electron.fs.createDir(fullPath);
+        if (isRemote) {
+          await window.electron.sftp.mkdir(fullPath);
+        } else {
+          await window.electron.fs.createDir(fullPath);
+        }
       }
 
       // Optimistic UI Update: 즉시 트리에 반영
@@ -694,7 +703,7 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
   // Helper: Deep refresh preserving expansion state
   // Finds all expanded directories in the current tree, re-reads them, and rebuilds the tree.
   const refreshDeep = async (rootPath: string) => {
-    if (!window.electron?.fs?.readDir) return;
+    if (isRemote ? !window.electron?.sftp?.list : !window.electron?.fs?.readDir) return;
 
     // 1. Collect all expanded paths from current tree
     const expandedPaths = new Set<string>();
@@ -714,7 +723,9 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
     // 2. Recursive build function that fetches fresh data
     const buildTree = async (currentPath: string): Promise<FileNode[]> => {
       try {
-        const result = await window.electron.fs.readDir(currentPath);
+        const result = isRemote
+          ? await window.electron.sftp.list(currentPath)
+          : await window.electron.fs.readDir(currentPath);
         if (!result.success || !result.files) return [];
 
         const processedNodes = processFileList(result.files);
@@ -750,7 +761,7 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
 
   // 특정 노드 새로고침 (확장 상태 유지)
   const refreshNode = async (path: string) => {
-    if (!window.electron?.fs?.readDir) return;
+    if (isRemote ? !window.electron?.sftp?.list : !window.electron?.fs?.readDir) return;
 
     // Normalize paths by removing trailing slashes for comparison
     const normalizedPath = path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
@@ -759,7 +770,9 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
     console.log(`Refreshing node: ${path} (Normalized: ${normalizedPath}, Workspace: ${normalizedWorkspace})`);
 
     try {
-      const result = await window.electron.fs.readDir(path);
+      const result = isRemote
+        ? await window.electron.sftp.list(path)
+        : await window.electron.fs.readDir(path);
       if (!result.success || !result.files) return;
 
       const newNodes = processFileList(result.files);
@@ -819,14 +832,16 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
 
   // 디렉토리 로드 (실제 파일 시스템)
   const loadDirectory = async (dirPath: string) => {
-    if (!window.electron?.fs?.readDir) {
-      console.error('Electron fs API not available');
+    if (isRemote ? !window.electron?.sftp?.list : !window.electron?.fs?.readDir) {
+      console.error('File system API not available');
       return;
     }
 
     setIsLoading(true);
     try {
-      const result = await window.electron.fs.readDir(dirPath);
+      const result = isRemote
+        ? await window.electron.sftp.list(dirPath)
+        : await window.electron.fs.readDir(dirPath);
 
       if (result.success && result.files) {
         setFileTree(processFileList(result.files));
@@ -840,10 +855,12 @@ function FileExplorer({ workspaceDir, onFileOpen, onCloseProject, refreshKey, on
 
   // 디렉토리 하위 항목 로드
   const loadSubDirectory = async (node: FileNode) => {
-    if (!window.electron?.fs?.readDir || !node.isDirectory) return;
+    if ((isRemote ? !window.electron?.sftp?.list : !window.electron?.fs?.readDir) || !node.isDirectory) return;
 
     try {
-      const result = await window.electron.fs.readDir(node.path);
+      const result = isRemote
+        ? await window.electron.sftp.list(node.path)
+        : await window.electron.fs.readDir(node.path);
 
       if (result.success && result.files) {
         // .git 디렉토리 제외 및 정렬

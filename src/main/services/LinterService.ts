@@ -83,14 +83,26 @@ export class LinterService {
 
             if (!Array.isArray(results)) return [];
 
-            return results.map((msg: any) => ({
-                line: msg.location.row,
-                column: msg.location.column,
-                type: 'error', // Ruff doesn't clearly distinguish warnings in JSON unless configured?
-                message: msg.message,
-                symbol: msg.code,
-                messageId: msg.code
-            }));
+            return results.map((msg: any) => {
+                // Ruff 에러 코드별 심각도 분류
+                // F: Pyflakes (실제 버그 가능성) → error
+                // E: PEP 8 스타일 → warning
+                // W: 경고 → warning
+                // C: Convention → info
+                // 나머지 (I, N, D, UP 등): 스타일/리팩토링 → warning
+                const code = msg.code || '';
+                const type = code.startsWith('F') ? 'error' :
+                    (code.startsWith('E') || code.startsWith('W')) ? 'warning' : 'info';
+
+                return {
+                    line: msg.location.row,
+                    column: msg.location.column,
+                    type,
+                    message: msg.message,
+                    symbol: msg.code,
+                    messageId: msg.code
+                };
+            });
         } catch (e) {
             console.warn('Failed to parse ruff output:', e);
             return [];

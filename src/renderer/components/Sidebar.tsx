@@ -1,9 +1,9 @@
 import '../styles/Sidebar.css';
-import { FolderIcon, SearchIcon, GitIcon } from './Icons';
+import { FolderIcon, SearchIcon, GitIcon, BugIcon } from './Icons';
 
 interface SidebarProps {
-  activeView: 'explorer' | 'search' | 'git';
-  onViewChange: (view: 'explorer' | 'search' | 'git') => void;
+  activeView: 'explorer' | 'search' | 'git' | 'debug';
+  onViewChange: (view: 'explorer' | 'search' | 'git' | 'debug') => void;
   isSidePanelOpen: boolean;
   onToggleSidebar: () => void;
 }
@@ -12,7 +12,7 @@ interface SidebarProps {
  * VS Code 스타일 왼쪽 액티비티 바
  */
 function Sidebar({ activeView, onViewChange, isSidePanelOpen, onToggleSidebar }: SidebarProps) {
-  const handleViewClick = (view: 'explorer' | 'search' | 'git') => {
+  const handleViewClick = (view: 'explorer' | 'search' | 'git' | 'debug') => {
     // 사이드 패널이 닫혀있거나, 열려있지만 다른 뷰인 경우 → 해당 뷰로 전환
     if (!isSidePanelOpen || activeView !== view) {
       onViewChange(view);
@@ -50,6 +50,14 @@ function Sidebar({ activeView, onViewChange, isSidePanelOpen, onToggleSidebar }:
         data-tooltip-pos="right"
       >
         <GitIcon size={24} />
+      </button>
+      <button
+        className={`sidebar-button ${activeView === 'debug' && isSidePanelOpen ? 'active' : ''}`}
+        onClick={() => handleViewClick('debug')}
+        data-tooltip="실행 및 디버그 (Ctrl+Shift+D)"
+        data-tooltip-pos="right"
+      >
+        <BugIcon size={24} />
       </button>
       <div className="sidebar-bottom">
 

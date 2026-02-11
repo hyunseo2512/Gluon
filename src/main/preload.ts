@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('fs:watch-event', listener);
       return () => ipcRenderer.removeListener('fs:watch-event', listener);
     },
+    getHomePath: () => ipcRenderer.invoke('fs:getHomePath'),
   },
 
   // 다이얼로그
@@ -39,7 +40,8 @@ contextBridge.exposeInMainWorld('electron', {
 
   // 터미널 (탭 지원)
   terminal: {
-    start: (terminalId: string, shellType?: string, cols?: number, rows?: number, cwd?: string) => ipcRenderer.invoke('terminal:start', terminalId, shellType, cols, rows, cwd),
+    start: (terminalId: string, shellType?: string, cols?: number, rows?: number, cwd?: string, initialCommand?: string) => ipcRenderer.invoke('terminal:start', terminalId, shellType, cols, rows, cwd, initialCommand),
+    getSystemShell: () => ipcRenderer.invoke('terminal:getSystemShell'),
     resize: (terminalId: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', terminalId, cols, rows),
     write: (terminalId: string, data: string) => ipcRenderer.send('terminal:write', terminalId, data),
     kill: (terminalId: string) => ipcRenderer.invoke('terminal:kill', terminalId),
@@ -106,6 +108,11 @@ contextBridge.exposeInMainWorld('electron', {
       return () => ipcRenderer.removeListener('auth:success', listener);
     },
     verify: (token: string, backendUrl: string) => ipcRenderer.invoke('auth:verify', token, backendUrl),
+    login: (backendUrl: string, username: string, password: string) => ipcRenderer.invoke('auth:login', backendUrl, username, password),
+    register: (backendUrl: string, email: string, password: string, fullName: string) => ipcRenderer.invoke('auth:register', backendUrl, email, password, fullName),
+    getUsers: (backendUrl: string, token: string) => ipcRenderer.invoke('auth:getUsers', backendUrl, token),
+    updateUserRole: (backendUrl: string, token: string, email: string, role: string) => ipcRenderer.invoke('auth:updateUserRole', backendUrl, token, email, role),
+    deleteUser: (backendUrl: string, token: string, email: string) => ipcRenderer.invoke('auth:deleteUser', backendUrl, token, email),
   },
 
   // 쉘 기능
@@ -126,13 +133,14 @@ contextBridge.exposeInMainWorld('electron', {
     branchCreate: (workingDir: string, branchName: string) => ipcRenderer.invoke('git:branch-create', workingDir, branchName),
     checkout: (workingDir: string, branchName: string) => ipcRenderer.invoke('git:checkout', workingDir, branchName),
     diff: (workingDir: string, filePath: string) => ipcRenderer.invoke('git:diff', workingDir, filePath),
-    log: (workingDir: string) => ipcRenderer.invoke('git:log', workingDir),
+    log: (workingDir: string, options?: { all?: boolean, limit?: number }) => ipcRenderer.invoke('git:log', workingDir, options),
     show: (workingDir: string, filePath: string) => ipcRenderer.invoke('git:show', workingDir, filePath),
   },
 
   // Search functionality
   search: {
     text: (workingDir: string, query: string) => ipcRenderer.invoke('search:text', workingDir, query),
+    files: (workingDir: string, query: string) => ipcRenderer.invoke('fs:searchFiles', workingDir, query),
   },
 
   // Extensions functionality
@@ -147,8 +155,10 @@ contextBridge.exposeInMainWorld('electron', {
     connect: (config: any) => ipcRenderer.invoke('ssh:connect', config),
     disconnect: () => ipcRenderer.invoke('ssh:disconnect'),
     startShell: (terminalId: string) => ipcRenderer.invoke('ssh:start-shell', terminalId),
-    write: (data: string) => ipcRenderer.invoke('ssh:write', data),
-    resize: (cols: number, rows: number) => ipcRenderer.invoke('ssh:resize', cols, rows),
+    execShell: (terminalId: string, command: string) => ipcRenderer.invoke('ssh:exec-shell', terminalId, command),
+    closeShell: (terminalId: string) => ipcRenderer.invoke('ssh:close-shell', terminalId),
+    write: (terminalId: string, data: string) => ipcRenderer.invoke('ssh:write', terminalId, data),
+    resize: (terminalId: string, cols: number, rows: number) => ipcRenderer.invoke('ssh:resize', terminalId, cols, rows),
   },
 
   // SFTP functionality
@@ -187,6 +197,9 @@ contextBridge.exposeInMainWorld('electron', {
     getVersion: () => ipcRenderer.invoke('python:get-version'),
     run: (script: string) => ipcRenderer.invoke('python:run', script),
   },
+  env: {
+    scanPython: (projectRoot: string) => ipcRenderer.invoke('env:scan-python', projectRoot),
+  },
 });
 
 /**
@@ -208,6 +221,7 @@ declare global {
         watch: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
         unwatch: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
         onWatchEvent: (callback: (event: { type: string; filename: string; dirPath: string }) => void) => () => void;
+        getHomePath: () => Promise<{ success: boolean; path?: string }>;
       };
       dialog: {
         openDirectory: () => Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>;
@@ -216,7 +230,8 @@ declare global {
         showMessageBox: (options: any) => Promise<{ success: boolean; response?: number; error?: string }>;
       };
       terminal: {
-        start: (terminalId: string, shellType?: string, cols?: number, rows?: number, cwd?: string) => Promise<{ success: boolean; terminalId?: string; error?: string }>;
+        start: (terminalId: string, shellType?: string, cols?: number, rows?: number, cwd?: string, initialCommand?: string) => Promise<{ success: boolean; terminalId?: string; error?: string }>;
+        getSystemShell: () => Promise<{ success: boolean; shell?: string; error?: string }>;
         resize: (terminalId: string, cols: number, rows: number) => Promise<{ success: boolean; error?: string }>;
         write: (terminalId: string, data: string) => void;
         kill: (terminalId: string) => Promise<{ success: boolean; error?: string }>;
@@ -254,9 +269,19 @@ declare global {
         set: (key: string, value: any) => Promise<{ success: boolean; error?: string }>;
         delete: (key: string) => Promise<{ success: boolean; error?: string }>;
       };
+      settings: {
+        getPath: () => Promise<string>;
+        read: () => Promise<{ success: boolean; data?: object; error?: string }>;
+        write: (settings: object) => Promise<{ success: boolean; error?: string }>;
+      };
       auth: {
         onSuccess: (callback: (token: string) => void) => () => void;
         verify: (token: string, backendUrl: string) => Promise<{ success: boolean; user?: any; error?: string; status?: number }>;
+        login: (backendUrl: string, username: string, password: string) => Promise<{ success: boolean; data?: any; error?: string; status?: number }>;
+        register: (backendUrl: string, email: string, password: string, fullName: string) => Promise<{ success: boolean; data?: any; error?: string; status?: number }>;
+        getUsers: (backendUrl: string, token: string) => Promise<{ success: boolean; data?: any; error?: string; status?: number }>;
+        updateUserRole: (backendUrl: string, token: string, email: string, role: string) => Promise<{ success: boolean; data?: any; error?: string; status?: number }>;
+        deleteUser: (backendUrl: string, token: string, email: string) => Promise<{ success: boolean; data?: any; error?: string; status?: number }>;
       };
       shell: {
         openExternal: (url: string) => Promise<void>;
@@ -273,11 +298,12 @@ declare global {
         branchCreate: (workingDir: string, branchName: string) => Promise<{ success: boolean; error?: string }>;
         checkout: (workingDir: string, branchName: string) => Promise<{ success: boolean; error?: string }>;
         diff: (workingDir: string, filePath: string) => Promise<{ success: boolean; original?: string; error?: string }>;
-        log: (workingDir: string) => Promise<{ success: boolean; log?: any; error?: string }>;
+        log: (workingDir: string, options?: { all?: boolean, limit?: number }) => Promise<{ success: boolean; log?: any; error?: string }>;
         show: (workingDir: string, filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
       };
       search: {
         text: (workingDir: string, query: string) => Promise<{ success: boolean; results?: Array<{ file: string; isDirectory: boolean; name: string }>; error?: string }>;
+        files: (workingDir: string, query: string) => Promise<{ success: boolean; files?: string[]; error?: string }>;
       };
       extensions: {
         install: (toolId: string, packageManager: 'npm' | 'pip') => Promise<{ success: boolean; output?: string; error?: string }>;
@@ -288,8 +314,10 @@ declare global {
         connect: (config: any) => Promise<{ success: boolean; error?: string }>;
         disconnect: () => Promise<{ success: boolean; error?: string }>;
         startShell: (terminalId: string) => Promise<{ success: boolean; error?: string }>;
-        write: (data: string) => void;
-        resize: (cols: number, rows: number) => void;
+        execShell: (terminalId: string, command: string) => Promise<{ success: boolean; error?: string }>; // Added missing signature
+        closeShell: (terminalId: string) => Promise<{ success: boolean; error?: string }>;
+        write: (terminalId: string, data: string) => void;
+        resize: (terminalId: string, cols: number, rows: number) => void;
       };
       sftp: {
         start: () => Promise<{ success: boolean; error?: string }>;

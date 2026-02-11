@@ -35,6 +35,10 @@
   font-weight: 800;
   margin: 0;
   letter-spacing: 0.5px;
+  color: #E0E0E0;
+}
+
+.hello-greeting.root-anim {
   background: linear-gradient(90deg,
       #ffffff 0%,
       #BB86FC 25%,
@@ -223,12 +227,18 @@
 }
 
 .ai-message-user .ai-message-content {
-  background-color: #313438;
-  /* Subtle Dark Grey */
+  background-color: rgba(20, 30, 48, 0.85);
   color: #e0e0e0;
   margin-left: var(--spacing-lg);
-  border: 1px solid #454545;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(60, 80, 120, 0.35);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  padding: 10px var(--spacing-md);
+  white-space: normal;
+}
+
+.ai-message-user .ai-message-content p {
+  margin: 0;
+  line-height: 1.5;
 }
 
 .ai-message-assistant .ai-message-content {
@@ -390,7 +400,7 @@
 .ai-model-select.mode-ask,
 .ai-model-select.mode-ask span,
 .ai-model-select.mode-ask svg {
-  color: var(--accent-blue) !important;
+  color: var(--accent-purple) !important;
 }
 
 .ai-model-select.mode-debug,
@@ -402,7 +412,7 @@
 .ai-model-select.mode-agent,
 .ai-model-select.mode-agent span,
 .ai-model-select.mode-agent svg {
-  color: var(--accent-purple) !important;
+  color: var(--accent-blue) !important;
 }
 
 /* 툴바 버튼 공통 */
@@ -775,13 +785,13 @@
   font-style: italic;
   margin: 4px 0;
   padding: 4px 8px;
-  border-left: 2px solid var(--accent-blue);
-  background-color: rgba(52, 152, 219, 0.05);
+  border-left: 2px solid #5B9BD5;
+  background-color: rgba(91, 155, 213, 0.05);
   border-radius: 0 4px 4px 0;
 }
 
 .agent-action-line strong {
-  color: var(--accent-blue);
+  color: #5B9BD5;
   font-style: normal;
 }
 

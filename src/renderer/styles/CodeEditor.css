@@ -284,6 +284,10 @@
   font-size: 36px;
   font-weight: 700;
   letter-spacing: 2px;
+  color: #E0E0E0;
+}
+
+.logo-text.root {
   background: linear-gradient(135deg, #BB86FC 0%, #00BFFF 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;

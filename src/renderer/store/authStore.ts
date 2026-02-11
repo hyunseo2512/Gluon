@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import axios from 'axios';
 
 interface User {
     id: string;
-    email: string;
+    username: string;
+    email?: string;
     full_name?: string;
     picture?: string;
     role: string;
@@ -13,12 +13,21 @@ interface AuthState {
     user: User | null;
     token: string | null;
     isLoading: boolean;
+    backendUrl: string | null;
+    authError: string | null;
+    isLoginModalOpen: boolean;
+
     login: () => Promise<void>;
     logout: () => void;
     checkAuth: () => Promise<void>;
-    backendUrl: string | null;
-    authError: string | null;
     manualLogin: (token: string) => Promise<boolean>;
+
+    // Local Auth & UI
+    openLoginModal: () => void;
+    closeLoginModal: () => void;
+    loginLocal: (username: string, password: string) => Promise<boolean>;
+    register: (username: string, password: string, fullName: string) => Promise<boolean>;
+    clearAuthError: () => void;
 }
 
 // [CRITICAL] 사설 인증서(Self-signed) 허용을 위한 Axios 설정
@@ -33,31 +42,34 @@ interface AuthState {
 // 대안: 인증서 에러를 무시하도록 앱 실행 시점에 플래그를 주거나,
 // 지금은 일단 Axios 인스턴스에 설정을 넣어봄.
 
+// Default AI Core URL (Tailscale/Remote)
+const DEFAULT_BACKEND_URL = 'http://100.110.157.32:9000';
+
 export const useAuthStore = create<AuthState>((set, get) => ({
     user: null,
     token: null,
     isLoading: true,
     backendUrl: null,
     authError: null,
+    isLoginModalOpen: false,
+
+    openLoginModal: () => set({ isLoginModalOpen: true, authError: null }),
+    closeLoginModal: () => set({ isLoginModalOpen: false, authError: null }),
+    clearAuthError: () => set({ authError: null }),
 
     // 로그인 시작 (외부 브라우저 열기)
     login: async () => {
-        // Eden Backend URL 가져오기
-        const result = await window.electron.store.get('eden_server_url');
-        let BACKEND_URL = 'https://quark.panthera-karat.ts.net:8000'; // Default to Remote Server
+        // Backend URL 가져오기
+        const result = await window.electron.store.get('ai_core_url');
+        let BACKEND_URL = DEFAULT_BACKEND_URL;
 
         if (result.success && result.value) {
             let val = String(result.value).trim();
             // Remove trailing slash
             val = val.replace(/\/$/, '');
 
-            // [FIX] Force overwrite localhost for this deployment
-            if (val.includes('localhost') || val.includes('127.0.0.1')) {
-                console.log('🔄 Detected localhost config, migrating to Remote Server URL...');
-                val = 'https://quark.panthera-karat.ts.net:8000';
-                // Update store asynchronously to persist the fix
-                window.electron.store.set('eden_server_url', val);
-            }
+            // [FIX] Force overwrite check removed for remote access support
+            // if (val.includes('localhost') || val.includes('127.0.0.1')) { ... }
 
             // Add protocol if missing (default to http for private networks usually, unless specified)
             if (!val.startsWith('http')) {
@@ -83,8 +95,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             // Then delete
             await window.electron.store.delete('token');
 
-            // Clear state
-            set({ user: null, token: null, authError: null });
+            // Clear state + 로그인 화면으로
+            set({ user: null, token: null, authError: null, isLoginModalOpen: true });
             console.log('✅ Logout successful, state cleared.');
 
             // Force reload to ensure clean state (Optional, but often safer for auth)
@@ -104,8 +116,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             const token = result.success ? result.value : null;
 
             // Eden Backend URL 가져오기
-            const urlResult = await window.electron.store.get('eden_server_url');
-            let BACKEND_URL = 'https://quark.panthera-karat.ts.net:8000';
+            const urlResult = await window.electron.store.get('ai_core_url');
+            let BACKEND_URL = DEFAULT_BACKEND_URL;
 
             if (urlResult.success && urlResult.value) {
                 try {
@@ -163,7 +175,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     manualLogin: async (inputToken: string) => {
         set({ isLoading: true, authError: null });
         try {
-            const backendUrl = get().backendUrl || 'https://quark.panthera-karat.ts.net:8000';
+            const backendUrl = get().backendUrl || DEFAULT_BACKEND_URL;
 
             // 토큰 검증 via Main Process
             const result = await window.electron.auth.verify(inputToken, backendUrl);
@@ -183,7 +195,65 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         } finally {
             set({ isLoading: false });
         }
-    }
+    },
+
+    loginLocal: async (username, password) => {
+        set({ isLoading: true, authError: null });
+        try {
+            // Get backend URL
+            const result = await window.electron.store.get('ai_core_url');
+            let BACKEND_URL = DEFAULT_BACKEND_URL;
+            if (result.success && result.value) {
+                BACKEND_URL = String(result.value).replace(/\/$/, '');
+                if (!BACKEND_URL.startsWith('http')) BACKEND_URL = `http://${BACKEND_URL}`;
+            }
+
+            // IPC를 통해 메인 프로세스에서 요청 (렌더러 보안 정책 우회)
+            const loginResult = await window.electron.auth.login(BACKEND_URL, username, password);
+
+            if (loginResult.success && loginResult.data) {
+                const token = loginResult.data.access_token;
+                await window.electron.store.set('token', token);
+                set({ token, authError: null });
+                await get().checkAuth();
+                return true;
+            } else {
+                throw new Error(loginResult.error || 'Login failed');
+            }
+        } catch (error: any) {
+            console.error('Local login failed:', error);
+            set({ authError: error.message || 'Login failed', isLoading: false });
+            return false;
+        }
+    },
+
+    register: async (username, password, fullName) => {
+        set({ isLoading: true, authError: null });
+        try {
+            // Get backend URL
+            const result = await window.electron.store.get('ai_core_url');
+            let BACKEND_URL = DEFAULT_BACKEND_URL;
+            if (result.success && result.value) {
+                BACKEND_URL = String(result.value).replace(/\/$/, '');
+                if (!BACKEND_URL.startsWith('http')) BACKEND_URL = `http://${BACKEND_URL}`;
+            }
+
+            // IPC를 통해 메인 프로세스에서 요청
+            const regResult = await window.electron.auth.register(BACKEND_URL, username, password, fullName);
+
+            if (regResult.success && regResult.data) {
+                // 회원가입 성공 → 로그인 화면으로 (자동 로그인 안 함)
+                set({ isLoading: false, authError: null });
+                return true;
+            } else {
+                throw new Error(regResult.error || 'Registration failed');
+            }
+        } catch (error: any) {
+            console.error('Registration failed:', error);
+            set({ authError: error.message || 'Registration failed', isLoading: false });
+            return false;
+        }
+    },
 }));
 
 // 메인 프로세스로부터 로그인 성공 메시지 수신 (Deep Link)
@@ -192,8 +262,8 @@ if (window.electron && window.electron.auth) {
         console.log('🔒 Auth success event received form Main process');
 
         // Eden Backend URL 가져오기 (비동기 처리)
-        const urlResult = await window.electron.store.get('eden_server_url');
-        let BACKEND_URL = 'https://quark.panthera-karat.ts.net:8000';
+        const urlResult = await window.electron.store.get('ai_core_url');
+        let BACKEND_URL = DEFAULT_BACKEND_URL;
 
         if (urlResult.success && urlResult.value) {
             try {
