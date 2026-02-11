@@ -1,4 +1,4 @@
-# Gluon - AI 기반 IDE (Quark 연동)
+# Gluon - AI 기반 IDE 
 
 > **AI 통합 모던 개발 환경** 
 
