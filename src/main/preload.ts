@@ -63,6 +63,11 @@ contextBridge.exposeInMainWorld('electron', {
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close'),
     create: () => ipcRenderer.invoke('window:create'),
+    onMaximizedChanged: (callback: (isMaximized: boolean) => void) => {
+      const handler = (_event: any, isMaximized: boolean) => callback(isMaximized);
+      ipcRenderer.on('window:maximized-changed', handler);
+      return () => ipcRenderer.removeListener('window:maximized-changed', handler);
+    },
   },
 
   // 줌 제어
@@ -98,6 +103,24 @@ contextBridge.exposeInMainWorld('electron', {
   // 앱 정보/경로
   app: {
     getPath: (name: string) => ipcRenderer.invoke('app:getPath', name),
+  },
+
+  // 디버그 (스크립트 실행)
+  debug: {
+    run: (sessionId: string, filePath: string, cwd: string) =>
+      ipcRenderer.invoke('debug:run', sessionId, filePath, cwd),
+    stop: (sessionId: string) =>
+      ipcRenderer.invoke('debug:stop', sessionId),
+    onOutput: (callback: (sessionId: string, data: string) => void) => {
+      const listener = (_event: any, sessionId: string, data: string) => callback(sessionId, data);
+      ipcRenderer.on('debug:output', listener);
+      return () => ipcRenderer.removeListener('debug:output', listener);
+    },
+    onExit: (callback: (sessionId: string, code: number) => void) => {
+      const listener = (_event: any, sessionId: string, code: number) => callback(sessionId, code);
+      ipcRenderer.on('debug:exit', listener);
+      return () => ipcRenderer.removeListener('debug:exit', listener);
+    },
   },
 
   // 인증 이벤트
@@ -327,6 +350,12 @@ declare global {
         mkdir: (remotePath: string) => Promise<{ success: boolean; error?: string }>;
         delete: (remotePath: string, isDirectory: boolean) => Promise<{ success: boolean; error?: string }>;
         stat: (remotePath: string) => Promise<{ success: boolean; stat?: { isDirectory: boolean; size: number }; error?: string }>;
+      };
+      debug: {
+        run: (sessionId: string, filePath: string, cwd: string) => Promise<{ success: boolean; command?: string; error?: string }>;
+        stop: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
+        onOutput: (callback: (sessionId: string, data: string) => void) => () => void;
+        onExit: (callback: (sessionId: string, code: number) => void) => () => void;
       };
       chat: {
         startStream: (streamId: string, url: string, body: any, headers: any) => Promise<{ success: boolean; error?: string }>;

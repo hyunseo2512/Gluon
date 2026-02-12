@@ -19,6 +19,8 @@ if (!isDev) {
 app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
 
+
+
 // [CRITICAL] Prevent crash on EPIPE (broken pipe) in Linux environments
 // This happens when the app is launched from a terminal that is subsequently closed,
 // or when running as an AppImage where stdout/stderr might not be attached.
@@ -103,8 +105,14 @@ function createWindow(): void {
   };
   win.on('resize', saveWindowState);
   win.on('move', saveWindowState);
-  win.on('maximize', saveWindowState);
-  win.on('unmaximize', saveWindowState);
+  win.on('maximize', () => {
+    saveWindowState();
+    win.webContents.send('window:maximized-changed', true);
+  });
+  win.on('unmaximize', () => {
+    saveWindowState();
+    win.webContents.send('window:maximized-changed', false);
+  });
 
   // 윈도우가 준비되면 표시
   win.once('ready-to-show', () => {
@@ -822,6 +830,7 @@ function setupIpcHandlers(): void {
     } else {
       win?.maximize();
     }
+    return win?.isMaximized() ?? false;
   });
 
   ipcMain.handle('window:close', () => {
@@ -1310,6 +1319,106 @@ function setupIpcHandlers(): void {
     } catch (error: any) {
       return { success: true, installed: false };
     }
+  });
+
+  // --- Debug: Run Script ---
+  const debugProcesses = new Map<string, any>();
+
+  ipcMain.handle('debug:run', (_event, sessionId: string, filePath: string, cwd: string) => {
+    const { spawn } = require('child_process');
+    const pathModule = require('path');
+
+    // Kill existing
+    if (debugProcesses.has(sessionId)) {
+      try { debugProcesses.get(sessionId).kill('SIGTERM'); } catch (e) { /* */ }
+      debugProcesses.delete(sessionId);
+    }
+
+    const ext = pathModule.extname(filePath).toLowerCase();
+    let command: string;
+    let args: string[];
+
+    switch (ext) {
+      case '.py':
+        command = 'python3';
+        args = ['-u', filePath];
+        break;
+      case '.js':
+        command = 'node';
+        args = [filePath];
+        break;
+      case '.ts':
+        command = 'npx';
+        args = ['ts-node', filePath];
+        break;
+      case '.sh':
+        command = 'bash';
+        args = [filePath];
+        break;
+      case '.go':
+        command = 'go';
+        args = ['run', filePath];
+        break;
+      default:
+        command = 'node';
+        args = [filePath];
+    }
+
+    console.log(`🐛 Debug: Running ${command} ${args.join(' ')} in ${cwd}`);
+
+    try {
+      const child = spawn(command, args, {
+        cwd,
+        env: { ...process.env, PYTHONUNBUFFERED: '1' },
+        shell: false,
+      });
+
+      debugProcesses.set(sessionId, child);
+
+      child.stdout?.on('data', (data: Buffer) => {
+        BrowserWindow.getAllWindows().forEach(w =>
+          w.webContents.send('debug:output', sessionId, data.toString())
+        );
+      });
+
+      child.stderr?.on('data', (data: Buffer) => {
+        BrowserWindow.getAllWindows().forEach(w =>
+          w.webContents.send('debug:output', sessionId, data.toString())
+        );
+      });
+
+      child.on('close', (code: number | null) => {
+        debugProcesses.delete(sessionId);
+        BrowserWindow.getAllWindows().forEach(w =>
+          w.webContents.send('debug:exit', sessionId, code ?? -1)
+        );
+      });
+
+      child.on('error', (err: Error) => {
+        debugProcesses.delete(sessionId);
+        BrowserWindow.getAllWindows().forEach(w => {
+          w.webContents.send('debug:output', sessionId, `Error: ${err.message}\n`);
+          w.webContents.send('debug:exit', sessionId, -1);
+        });
+      });
+
+      return { success: true, command: `${command} ${args.join(' ')}` };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('debug:stop', (_event, sessionId: string) => {
+    if (debugProcesses.has(sessionId)) {
+      const child = debugProcesses.get(sessionId);
+      try {
+        child.kill('SIGTERM');
+        setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) { /* */ } }, 2000);
+      } catch (e) { /* */ }
+      debugProcesses.delete(sessionId);
+      return { success: true };
+    }
+    return { success: false, error: 'No running process' };
   });
 }
 

@@ -191,7 +191,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { useAuthStore } from './store/authStore';
 import CommandPalette from './components/CommandPalette';
 import { useCommandStore } from './store/commandStore'; // Added this import for useAuthStore
-import { InterpreterSelector } from './components/InterpreterSelector';
+
 
 import EditorPane from './components/EditorPane';
 
@@ -207,8 +207,8 @@ function App() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
-  const [isInterpreterSelectorOpen, setIsInterpreterSelectorOpen] = useState(false);
-  const [selectedInterpreter, setSelectedInterpreter] = useState<string | undefined>(undefined);
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+
   const [editorSettings, setEditorSettings] = useState<EditorSettings>(DEFAULT_EDITOR_SETTINGS);
 
   // 설정 로드 함수 - settings.json에서 읽어옴
@@ -244,6 +244,14 @@ function App() {
       useAuthStore.getState().checkAuth();
     });
     loadEditorSettings();
+  }, []);
+
+  // 윈도우 최대화 상태 추적
+  useEffect(() => {
+    const cleanup = (window.electron as any).window.onMaximizedChanged?.((maximized: boolean) => {
+      setIsWindowMaximized(maximized);
+    });
+    return () => cleanup?.();
   }, []);
 
   // 여러 파일 관리 (Primary / Secondary Split View)
@@ -1739,7 +1747,7 @@ function App() {
 
           if (ext === 'py') {
             // Use selected python path or fallback to python3
-            const pythonPath = selectedInterpreter || 'python3';
+            const pythonPath = 'python3';
             command = `"${pythonPath}" -u "${currentFile.path}"`;
           } else if (ext === 'js') {
             command = `node "${currentFile.path}"`;
@@ -1762,17 +1770,29 @@ function App() {
               }));
             }, isTerminalOpen ? 0 : 300); // Small delay if opening terminal for the first time
           }
+        } else if (e.shiftKey) {
+          // Shift+F5: Stop Debug
+          window.dispatchEvent(new CustomEvent('gluon:debug-stop'));
         } else {
-          // Ctrl+F5: Start Debugging (Coming Soon)
-          console.log('Ctrl+F5 Pressed: Start Debugging (Not Implemented)');
-          setAlertMessage('Interactive Debugging is coming soon!\nUse F5 to Run without Debugging.');
+          // Ctrl+F5: Start Debugging via Debug Panel
+          const currentFile = activeGroup === 'primary'
+            ? primaryFiles[primaryActiveIndex]
+            : secondaryFiles[secondaryActiveIndex];
+          if (currentFile && workspaceDir) {
+            if (currentFile.isDirty) {
+              handleFileSave(activeGroup === 'primary' ? primaryActiveIndex : secondaryActiveIndex);
+            }
+            window.dispatchEvent(new CustomEvent('gluon:debug-run', {
+              detail: { filePath: currentFile.path, cwd: workspaceDir }
+            }));
+          }
         }
       }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [activeFileIndex, openFiles, isTerminalOpen, workspaceDir, selectedInterpreter]);
+  }, [activeFileIndex, openFiles, isTerminalOpen, workspaceDir]);
 
   return (
     <div className="app">
@@ -2013,9 +2033,8 @@ function App() {
             <button
               className="window-button maximize"
               onClick={() => window.electron.window.maximize()}
-
             >
-              □
+              {isWindowMaximized ? <span style={{ fontSize: '11px', lineHeight: '1', display: 'inline-block', transform: 'translateY(2px)' }}>🗗</span> : '□'}
             </button>
             <button
               className="window-button close"
@@ -2161,7 +2180,14 @@ function App() {
             )
           )}
           {sidebarView === 'debug' && (
-            <DebugPanel workspaceDir={workspaceDir || undefined} />
+            <DebugPanel
+              workspaceDir={workspaceDir || undefined}
+              currentFilePath={
+                activeGroup === 'primary'
+                  ? primaryFiles[primaryActiveIndex]?.path
+                  : secondaryFiles[secondaryActiveIndex]?.path
+              }
+            />
           )}
 
         </div>
@@ -2224,7 +2250,7 @@ function App() {
             ) : (
               <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden' }}>
                 {/* Primary Editor Pane */}
-                <div style={{ flex: isSplitView ? editorSplitRatio : 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <div style={{ flex: isSplitView ? editorSplitRatio : 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
                   <EditorPane
                     files={primaryFiles}
                     activeIndex={primaryActiveIndex}
@@ -2266,7 +2292,7 @@ function App() {
                       }}
                     />
                     {/* Secondary Editor Pane */}
-                    <div style={{ flex: 1 - editorSplitRatio, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <div style={{ flex: 1 - editorSplitRatio, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
                       <EditorPane
                         files={secondaryFiles}
                         activeIndex={secondaryActiveIndex}
@@ -2495,17 +2521,7 @@ function App() {
             </>
           )}
 
-          {/* Python Interpreter Status */}
-          <div
-            className="status-item clickable"
-            onClick={() => setIsInterpreterSelectorOpen(true)}
-            data-tooltip="Select Python Interpreter"
-            data-tooltip-pos="top"
-          >
-            <span className="status-value" style={{ color: '#F1D646' }}>
-              {selectedInterpreter ? `Python ${selectedInterpreter.split('/').slice(-3).join('/')}` : 'Select Python'}
-            </span>
-          </div>
+
 
 
         </div>
@@ -2629,16 +2645,7 @@ function App() {
       )}
       {/* Login Modal removed */}
 
-      <InterpreterSelector
-        isOpen={isInterpreterSelectorOpen}
-        onClose={() => setIsInterpreterSelectorOpen(false)}
-        onSelect={(path) => {
-          setSelectedInterpreter(path);
-          // Optional: Save to store or notify user
-          console.log('Selected interpreter:', path);
-        }}
-        currentPath={selectedInterpreter}
-      />
+
     </div >
   );
 }

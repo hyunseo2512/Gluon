@@ -811,7 +811,7 @@ function CodeEditor({
                 )}
 
                 {/* Editor: Always render to keep state/history, hide if preview active */}
-                <div style={{ display: (isMarkdown && markdownPreview) ? 'none' : 'block', height: '100%' }}>
+                <div style={{ display: (isMarkdown && markdownPreview) ? 'none' : 'block', height: '100%', overflow: 'hidden', position: 'relative' }}>
                   <Editor
                     height="100%"
                     path={activeFile.path}
@@ -888,6 +888,7 @@ function CodeEditor({
                       insertSpaces: settings?.insertSpaces ?? true,
                       wordWrap: settings?.wordWrap ? 'on' : 'off',
                       mouseWheelZoom: true,
+                      fixedOverflowWidgets: true,
                       'semanticHighlighting.enabled': true,
                     }}
                   />

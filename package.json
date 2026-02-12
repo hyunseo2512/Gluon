@@ -87,7 +87,8 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "pacman"
       ],
       "maintainer": "zxcvne <zxcvne@localhost>",
       "category": "Development",

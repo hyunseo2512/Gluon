@@ -124,6 +124,18 @@
 .editor-container {
   flex: 1;
   overflow: hidden;
+  position: relative;
+}
+
+/* Monaco 내부 오버플로우 요소 클리핑 — 시간 경과 후 우측 렌더링 깨짐 방지 */
+.editor-container .monaco-editor .overflow-guard {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.editor-container .monaco-editor {
+  width: 100% !important;
+  max-width: 100% !important;
 }
 
 .editor-empty {

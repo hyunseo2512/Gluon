@@ -6,13 +6,15 @@ interface InterpreterSelectorProps {
     onClose: () => void;
     onSelect: (path: string) => void;
     currentPath?: string;
+    workspaceDir?: string;
 }
 
 export const InterpreterSelector: React.FC<InterpreterSelectorProps> = ({
     isOpen,
     onClose,
     onSelect,
-    currentPath
+    currentPath,
+    workspaceDir
 }) => {
     const [interpreters, setInterpreters] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -29,9 +31,8 @@ export const InterpreterSelector: React.FC<InterpreterSelectorProps> = ({
         setLoading(true);
         setError(null);
         try {
-            // Get scanned list from main process
             const electron = window.electron as any;
-            const result = await electron.env.scanPython(process.cwd()); // Or active file root
+            const result = await electron.env.scanPython(workspaceDir || '.');
             setInterpreters(result);
         } catch (e: any) {
             console.error('Failed to scan interpreters', e);

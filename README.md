@@ -86,3 +86,5 @@ npm run package    # 출력: release/
 
 ---
 
+## 라이선스
+MIT
