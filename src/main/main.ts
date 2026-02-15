@@ -1,3 +1,4 @@
+import './utils/logSuppressor';
 import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import path from 'path';
 import { pythonService } from './services/pythonService';
@@ -6,13 +7,7 @@ import { linterService } from './services/LinterService';
 // 개발 환경 여부 확인
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
-// 프로덕션 빌드에서 모든 콘솔 출력 숨김
-if (!isDev) {
-  console.log = () => { };
-  console.info = () => { };
-  console.warn = () => { };
-  console.error = () => { };
-}
+
 
 // [CRITICAL] Self-signed 인증서 에러 무시 (전역 설정)
 // CLI 인자로 넘기는 것보다 여기서 설정하는 것이 가장 확실함.

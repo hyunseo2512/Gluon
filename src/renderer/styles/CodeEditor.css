@@ -125,6 +125,8 @@
   flex: 1;
   overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Monaco 내부 오버플로우 요소 클리핑 — 시간 경과 후 우측 렌더링 깨짐 방지 */

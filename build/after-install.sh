@@ -10,8 +10,10 @@ rm -f "$WRAPPER"
 # Create wrapper script
 cat > "$WRAPPER" << 'EOF'
 #!/bin/bash
-nohup /opt/Gluon/gluon --no-sandbox "$@" > /dev/null 2>&1 &
-disown
+# Gluon Background Wrapper
+# Suppresses all output and detaches the process
+
+(nohup /opt/Gluon/gluon --no-sandbox "$@" > /dev/null 2>&1 &)
 EOF
 
 chmod +x "$WRAPPER"

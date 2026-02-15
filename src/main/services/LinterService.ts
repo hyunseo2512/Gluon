@@ -91,8 +91,9 @@ export class LinterService {
                 // C: Convention → info
                 // 나머지 (I, N, D, UP 등): 스타일/리팩토링 → warning
                 const code = msg.code || '';
-                const type = code.startsWith('F') ? 'error' :
-                    (code.startsWith('E') || code.startsWith('W')) ? 'warning' : 'info';
+                const type = (code === 'F841' || code === 'F401') ? 'warning' :
+                    code.startsWith('F') ? 'error' :
+                        (code.startsWith('E') || code.startsWith('W')) ? 'warning' : 'info';
 
                 return {
                     line: msg.location.row,

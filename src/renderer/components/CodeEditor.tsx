@@ -811,8 +811,9 @@ function CodeEditor({
                 )}
 
                 {/* Editor: Always render to keep state/history, hide if preview active */}
-                <div style={{ display: (isMarkdown && markdownPreview) ? 'none' : 'block', height: '100%', overflow: 'hidden', position: 'relative' }}>
+                <div style={{ display: (isMarkdown && markdownPreview) ? 'none' : 'block', flex: 1, minHeight: 0, position: 'relative' }}>
                   <Editor
+                    key={activeFile.path}
                     height="100%"
                     path={activeFile.path}
                     language={language}
@@ -833,7 +834,7 @@ function CodeEditor({
                         );
                       }
                     }}
-                    value={activeFile.content}
+                    defaultValue={activeFile.content}
                     onChange={handleEditorChange}
                     theme={
                       language === 'markdown' ? 'gluon-markdown' :
