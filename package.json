@@ -8,7 +8,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
-    "dev:main": "tsc -p tsconfig.main.json && electron . --no-sandbox --ignore-certificate-errors",
+    "dev:main": "tsc -p tsconfig.main.json && electron . --no-sandbox --ignore-certificate-errors --ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime",
     "dev:renderer": "vite",
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
@@ -88,7 +88,13 @@
       "target": [
         "AppImage",
         "deb",
-        "pacman"
+        "pacman",
+        "rpm"
+      ],
+      "executableArgs": [
+        "--ozone-platform-hint=auto",
+        "--enable-features=WaylandWindowDecorations",
+        "--enable-wayland-ime"
       ],
       "maintainer": "zxcvne <zxcvne@localhost>",
       "category": "Development",
@@ -103,6 +109,12 @@
       }
     },
     "deb": {
+      "afterInstall": "build/after-install.sh"
+    },
+    "pacman": {
+      "afterInstall": "build/after-install.sh"
+    },
+    "rpm": {
       "afterInstall": "build/after-install.sh"
     },
     "protocols": [

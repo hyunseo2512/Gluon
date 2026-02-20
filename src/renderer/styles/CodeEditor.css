@@ -1,7 +1,8 @@
 .code-editor {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   background-color: var(--bg-primary);
 }
 
@@ -123,7 +124,10 @@
 /* 에디터 컨테이너 */
 .editor-container {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  min-height: 0;
   position: relative;
 }
 

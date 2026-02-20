@@ -12,13 +12,15 @@ if (!isDev) {
   console.info = () => { };
   console.warn = () => { };
   console.error = () => { };
+  // stdout/stderr 직접 쓰기도 억제
+  process.stdout.write = () => true;
+  process.stderr.write = () => true;
 }
 
 // [CRITICAL] Self-signed 인증서 에러 무시 (전역 설정)
 // CLI 인자로 넘기는 것보다 여기서 설정하는 것이 가장 확실함.
 app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
-
 
 
 // [CRITICAL] Prevent crash on EPIPE (broken pipe) in Linux environments

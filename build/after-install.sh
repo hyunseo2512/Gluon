@@ -10,7 +10,7 @@ rm -f "$WRAPPER"
 # Create wrapper script
 cat > "$WRAPPER" << 'EOF'
 #!/bin/bash
-nohup /opt/Gluon/gluon --no-sandbox "$@" > /dev/null 2>&1 &
+nohup /opt/Gluon/gluon --no-sandbox --ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime "$@" > /dev/null 2>&1 &
 disown
 EOF
 

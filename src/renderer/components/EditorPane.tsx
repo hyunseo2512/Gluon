@@ -23,6 +23,7 @@ interface EditorPaneProps {
     moveDirection?: 'left' | 'right';
     isSplitView?: boolean;
     onToggleSplit?: () => void;
+    extraBottomPadding?: number;
 }
 
 /**
@@ -47,7 +48,8 @@ function EditorPane({
     onMoveToOtherGroup,
     moveDirection,
     isSplitView,
-    onToggleSplit
+    onToggleSplit,
+    extraBottomPadding = 0
 }: EditorPaneProps) {
 
     // If pane is active, add a visual indicator?
@@ -84,6 +86,7 @@ function EditorPane({
                 isSplitView={isSplitView}
                 onToggleSplit={onToggleSplit}
                 isActive={isActive}
+                extraBottomPadding={extraBottomPadding}
             />
         </div>
     );

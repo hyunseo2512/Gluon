@@ -2026,22 +2026,34 @@ function App() {
             <button
               className="window-button minimize"
               onClick={() => window.electron.window.minimize()}
-
             >
-              _
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <line x1="1" y1="9" x2="9" y2="9" stroke="currentColor" strokeWidth="1" />
+              </svg>
             </button>
             <button
               className="window-button maximize"
               onClick={() => window.electron.window.maximize()}
             >
-              {isWindowMaximized ? <span style={{ fontSize: '11px', lineHeight: '1', display: 'inline-block', transform: 'translateY(2px)' }}>🗗</span> : '□'}
+              {isWindowMaximized ? (
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1">
+                  <rect x="4" y="0.5" width="7" height="7" rx="0.5" />
+                  <rect x="0.5" y="4" width="7" height="7" rx="0.5" fill="var(--bg-primary, #1a1a2e)" />
+                </svg>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
+                  <rect x="0.5" y="0.5" width="9" height="9" rx="0.5" />
+                </svg>
+              )}
             </button>
             <button
               className="window-button close"
               onClick={() => window.electron.window.close()}
-
             >
-              ✕
+              <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.2">
+                <line x1="1" y1="1" x2="9" y2="9" />
+                <line x1="9" y1="1" x2="1" y2="9" />
+              </svg>
             </button>
           </div>
         </div>
@@ -2218,7 +2230,8 @@ function App() {
             flex: 1,
             overflow: 'hidden',
             display: terminalHeight > window.innerHeight * 0.8 ? 'none' : 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            minHeight: 0 // Allow shrinking
           }}>
             {isLoginModalOpen ? (
               <LoginScreen />
@@ -2248,9 +2261,9 @@ function App() {
                 onRemoveRecent={handleRemoveRecent}
               />
             ) : (
-              <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden' }}>
+              <div style={{ flex: '1 1 0', display: 'flex', overflow: 'hidden', minHeight: 0 }}>
                 {/* Primary Editor Pane */}
-                <div style={{ flex: isSplitView ? editorSplitRatio : 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+                <div style={{ flex: isSplitView ? `${editorSplitRatio} 1 0` : '1 1 0', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
                   <EditorPane
                     files={primaryFiles}
                     activeIndex={primaryActiveIndex}
@@ -2292,7 +2305,7 @@ function App() {
                       }}
                     />
                     {/* Secondary Editor Pane */}
-                    <div style={{ flex: 1 - editorSplitRatio, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+                    <div style={{ flex: 1 - editorSplitRatio, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
                       <EditorPane
                         files={secondaryFiles}
                         activeIndex={secondaryActiveIndex}
@@ -2308,8 +2321,6 @@ function App() {
                         moveDirection="left"
                         settings={editorSettings}
                         workspaceDir={workspaceDir || undefined}
-                        isActive={activeGroup === 'secondary'}
-                        onFocus={() => setActiveGroup('secondary')}
                         isSplitView={isSplitView}
                         onToggleSplit={handleToggleSplit}
                       />
@@ -2320,37 +2331,48 @@ function App() {
             )}
           </div>
 
+          {/* Secondary pane handling if needed, but primary is key */}
+
           {/* 하단 터미널 - 글로벌 영역 (Ctrl+J로 토글) - display:none으로 숨기기 (세션 유지) */}
-          <div style={{ display: isTerminalOpen ? 'contents' : 'none' }}>
+          {/* 하단 터미널 - 글로벌 영역 (Ctrl+J로 토글) */}
+          <div style={{
+            display: isTerminalOpen ? 'flex' : 'none',
+            flexDirection: 'column',
+            height: terminalHeight > window.innerHeight * 0.8 ? '100%' : `${terminalHeight}px`,
+            flexShrink: 0, // 중요: 에디터가 줄어들게 함
+            borderTop: '1px solid var(--border-color)',
+            position: terminalHeight > window.innerHeight * 0.8 ? 'absolute' : 'relative',
+            top: terminalHeight > window.innerHeight * 0.8 ? 0 : 'auto',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: terminalHeight > window.innerHeight * 0.8 ? 999 : 'auto',
+            backgroundColor: 'var(--bg-primary)'
+          }}>
             <Resizer
               direction="vertical"
               onResize={(delta) => {
                 setTerminalHeight((prev) => {
                   const newHeight = prev - delta;
-                  // 80px 미만이면 터미널 닫기 (토글)
                   if (newHeight < 80) {
                     setTimeout(() => {
                       setIsTerminalOpen(false);
-                      setTerminalHeight(250); // 다음에 열 때 기본 크기로 복원
+                      setTerminalHeight(250);
+                      window.dispatchEvent(new Event('gluon-resize')); // Notify layout change
                     }, 0);
                     return 250;
                   }
-                  // 최소 100px 유지
+                  window.dispatchEvent(new Event('gluon-resize')); // Notify layout change
                   return Math.max(100, newHeight);
                 });
               }}
             />
-            <div
-              className="terminal-container"
-              style={{
-                height: terminalHeight > window.innerHeight * 0.8 ? '100%' : `${terminalHeight}px`,
-                flex: terminalHeight > window.innerHeight * 0.8 ? 1 : 'none',
-                flexShrink: 0,
-                minHeight: '100px'
-              }}
-            >
+            <div className="terminal-container" style={{ flex: 1, minHeight: 0 }}>
               <TerminalPanel
-                onClose={() => setIsTerminalOpen(false)}
+                onClose={() => {
+                  setIsTerminalOpen(false);
+                  setTimeout(() => window.dispatchEvent(new Event('gluon-resize')), 0);
+                }}
                 onMaximize={handleToggleTerminalMaximize}
                 isMaximized={terminalHeight > window.innerHeight * 0.8}
                 cwd={isRemoteWorkspace ? undefined : (workspaceDir || undefined)}

@@ -235,6 +235,7 @@ interface CodeEditorProps {
   isSplitView?: boolean;
   onToggleSplit?: () => void;
   isActive?: boolean;
+  extraBottomPadding?: number;
 }
 
 // 바이너리 파일 확장자 목록
@@ -288,13 +289,15 @@ function CodeEditor({
   moveDirection,
   isSplitView,
   onToggleSplit,
-  isActive = true
+  isActive = true,
+  extraBottomPadding = 0
 }: CodeEditorProps) {
   const [language, setLanguage] = useState('javascript');
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [forceOpenBinary, setForceOpenBinary] = useState<Set<string>>(new Set());
   const [markdownPreview, setMarkdownPreview] = useState(false);
   const { user } = useAuthStore();
+  const editorContainerRef = useRef<HTMLDivElement>(null);
 
   const activeFile = activeFileIndex >= 0 ? openFiles[activeFileIndex] : null;
   const isBinary = activeFile ? isBinaryFile(activeFile.path, activeFile.content) && !forceOpenBinary.has(activeFile.path) : false;
@@ -468,6 +471,60 @@ function CodeEditor({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onSave, settings, editorInstance]);
 
+  // Force update options whenever editor instance or settings or PADDING changes
+  useEffect(() => {
+    if (!editorInstance) return;
+
+    // Force update options
+    editorInstance.updateOptions({
+      scrollBeyondLastLine: true,
+      cursorSurroundingLines: 5,
+      minimap: { enabled: settings?.minimap ?? false },
+      lineNumbers: settings?.lineNumbers ? 'on' : 'off',
+      wordWrap: settings?.wordWrap ? 'on' : 'off',
+      padding: { top: 10, bottom: extraBottomPadding + 20 }
+    });
+
+    // Force layout update when padding changes
+    editorInstance.layout();
+
+    // Handle Layout Resizing (Custom Event from App.tsx) -> Fallback or specific trigger
+    const handleLayoutResize = () => {
+      editorInstance.layout();
+    };
+    window.addEventListener('gluon-resize', handleLayoutResize);
+
+    // Force layout update immediately
+    setTimeout(() => {
+      editorInstance.layout();
+    }, 50);
+
+    return () => {
+      window.removeEventListener('gluon-resize', handleLayoutResize);
+    };
+  }, [editorInstance, settings, extraBottomPadding]);
+
+  // ResizeObserver for smooth layout updates
+  useEffect(() => {
+    if (!editorInstance || !editorContainerRef.current) return;
+
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(() => {
+        if (editorInstance) {
+          editorInstance.layout();
+        }
+      });
+    });
+
+    observer.observe(editorContainerRef.current);
+
+    return () => observer.disconnect();
+  }, [editorInstance]);
+
+
+
+
+
   // Undo/Redo Event Listeners (from App Menu)
   useEffect(() => {
     if (!editorInstance) return;
@@ -562,7 +619,10 @@ function CodeEditor({
   };
 
   return (
-    <div className="code-editor">
+    <div
+      className="code-editor"
+      ref={editorContainerRef}
+    >
       {/* 에디터 탭들 - 파일이 있을 때만 표시 */}
       {openFiles.length > 0 && (
         <div className="editor-tabs-wrapper" style={{ display: 'flex', alignItems: 'center', backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', minHeight: '35px' }}>
@@ -802,7 +862,7 @@ function CodeEditor({
               <>
                 {/* Markdown Preview: Render if markdown, hidden if preview inactive */}
                 {isMarkdown && (
-                  <div style={{ display: markdownPreview ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
+                  <div style={{ display: markdownPreview ? 'block' : 'none', flex: 1, minHeight: 0, overflow: 'hidden' }}>
                     <MarkdownPreview
                       content={debouncedContent}
                       fileName={activeFile.path.split('/').pop()}
@@ -811,17 +871,27 @@ function CodeEditor({
                 )}
 
                 {/* Editor: Always render to keep state/history, hide if preview active */}
-                <div style={{ display: (isMarkdown && markdownPreview) ? 'none' : 'block', height: '100%', overflow: 'hidden', position: 'relative' }}>
+                <div style={{ display: (isMarkdown && markdownPreview) ? 'none' : 'block', flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
                   <Editor
+                    key={`editor-${settings?.fontSize}-${settings?.lineNumbers}`}
                     height="100%"
                     path={activeFile.path}
                     language={language}
                     onMount={(editor) => {
                       setEditorInstance(editor);
-                      // Force-enable semantic highlighting for JS/TS
+                      // Force-enable semantic highlighting + cursor auto-scroll
                       editor.updateOptions({
-                        'semanticHighlighting.enabled': true
+                        'semanticHighlighting.enabled': true,
+                        cursorSurroundingLines: 5,
+                        cursorSurroundingLinesStyle: 'all',
+                        scrollBeyondLastLine: true
                       } as any);
+
+                      // Explicit layout call to ensure correct dimensions
+                      setTimeout(() => {
+                        editor.layout();
+                      }, 100);
+
                       if (monaco) {
                         editor.addCommand(
                           monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,
@@ -882,13 +952,15 @@ function CodeEditor({
                       minimap: { enabled: settings?.minimap ?? false },
                       lineNumbers: settings?.lineNumbers ? 'on' : 'off',
                       roundedSelection: true,
-                      scrollBeyondLastLine: false,
+                      scrollBeyondLastLine: true,
                       automaticLayout: true,
                       tabSize: settings?.tabSize ?? 2,
                       insertSpaces: settings?.insertSpaces ?? true,
                       wordWrap: settings?.wordWrap ? 'on' : 'off',
                       mouseWheelZoom: true,
                       fixedOverflowWidgets: true,
+                      cursorSurroundingLines: 5,
+                      padding: { top: 10, bottom: 20 },
                       'semanticHighlighting.enabled': true,
                     }}
                   />

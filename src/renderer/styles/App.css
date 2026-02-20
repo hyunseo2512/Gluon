@@ -182,8 +182,6 @@
   background-color: transparent;
   border: none;
   color: var(--text-primary);
-  font-size: 16px;
-  font-weight: bold;
   cursor: pointer;
   transition: background-color 0.15s;
   padding: 0;
@@ -193,14 +191,9 @@
   background-color: var(--bg-hover);
 }
 
-.window-button.minimize {
-  font-size: 18px;
-  padding-bottom: 8px;
-}
+.window-button.minimize {}
 
-.window-button.maximize {
-  font-size: 14px;
-}
+.window-button.maximize {}
 
 /* 컨트롤 버튼 */
 .app-controls {
